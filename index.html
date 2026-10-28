@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wafer Fabrication Bootcamp</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+/* ===========================================
+   THEME: "Yellow Room" (litho-bay safelight)
+   Change colours / fonts here.
+   =========================================== */
+:root {
+  --stage-bg: #070605; --slide-bg: #12100c; --amber: #FFB000; --amber-30: rgba(255,176,0,.3); --amber-10: rgba(255,176,0,.1);
+  --text: #f4ead2; --muted: #a39677;
+  --display: 'Chakra Petch', sans-serif; --mono: 'IBM Plex Mono', monospace; --body: 'IBM Plex Sans Thai', sans-serif;
+  --ease: cubic-bezier(.16,1,.3,1);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+/* ===========================================
+   FIXED 16:9 STAGE: MANDATORY BASE STYLES
+   Include this ENTIRE file in every presentation.
+   Slides are authored at 1920×1080 and scaled as a whole.
+   =========================================== */
+
+/* 1. Lock the browser viewport */
+html,
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+
+/* 2. Full-window deck viewport */
+.deck-viewport {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    background: var(--stage-bg, #000);
+}
+
+/* 3. Fixed 16:9 design canvas.
+   JavaScript sets transform: translate(...) scale(...). */
+.deck-stage {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    transform-origin: 0 0;
+    background: var(--slide-bg, #fff);
+}
+
+/* 4. Slides stack inside the fixed stage.
+   Content must be laid out at 1920×1080, not reflowed per device. */
+.slide {
+    position: absolute;
+    inset: 0;
+    width: 1920px;
+    height: 1080px;
+    overflow: hidden;
+    display: block;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    background: var(--slide-bg, #fff);
+}
+
+.slide.active,
+.slide.visible {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 1;
+}
+
+/* 5. Keep media inside authored slide bounds */
+img,
+video,
+canvas,
+svg {
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* 6. Presentation chrome stays outside the slide design system */
+.deck-controls {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    transform: translateX(-50%);
+    z-index: 1000;
+}
+
+/* 7. Print one fixed-size slide per page */
+@media print {
+    html,
+    body {
+        width: 1920px;
+        height: auto;
+        overflow: visible;
+        background: #fff;
+    }
+
+    .deck-viewport {
+        position: static;
+        overflow: visible;
+        background: #fff;
+    }
+
+    .deck-stage {
+        position: static;
+        width: auto;
+        height: auto;
+        transform: none !important;
+        background: none;
+    }
+
+    .slide {
+        position: relative;
+        display: block !important;
+        visibility: visible !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        width: 1920px;
+        height: 1080px;
+        break-after: page;
+        page-break-after: always;
+    }
+
+    .slide:last-child {
+        break-after: auto;
+        page-break-after: auto;
+    }
+
+    .deck-controls {
+        display: none !important;
+    }
+}
+
+/* 8. Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        transition-duration: 0.2s !important;
+    }
+}
+
+
+/* ===========================================
+   WAFER 3D ENGINE (CSS 3D cuboids, no libraries)
+   .viewer = perspective box, .scene = rotatable floor (X right, Y depth, Z up)
+   =========================================== */
+.viewer { position: absolute; perspective: 2600px; perspective-origin: 50% 30%; cursor: grab; touch-action: none; }
+.viewer:active { cursor: grabbing; }
+.scene { position: absolute; left: 50%; top: 55%; width: 0; height: 0; transform-style: preserve-3d;
+  transform: rotateX(var(--rx, 58deg)) rotateZ(var(--rz, -38deg)) scale3d(var(--zoom, 1), var(--zoom, 1), var(--zoom, 1)); transition: transform .08s linear; }
+.cub { position: absolute; left: 0; top: 0; transform-style: preserve-3d; }
+.face { position: absolute; left: 0; top: 0; transform-origin: 0 0; background: var(--c); }
+.face.top   { box-shadow: inset 0 0 0 1px rgba(255,255,255,.16); }
+.face.front { background: linear-gradient(rgba(0,0,0,.20), rgba(0,0,0,.20)), var(--c); }
+.face.back  { background: linear-gradient(rgba(0,0,0,.28), rgba(0,0,0,.28)), var(--c); }
+.face.side  { background: linear-gradient(rgba(0,0,0,.36), rgba(0,0,0,.36)), var(--c); }
+.cub.ghost .face { opacity: .28; }
+/* Build-up entrance: each layer drops in, staggered by --i.
+   NOTE: never animate opacity on .cub itself, since opacity < 1 on a preserve-3d group flattens it.
+   The group moves (transform only) and its faces fade. */
+.slide.visible .cub.drop { animation: layerDrop 1s cubic-bezier(.16,1,.3,1) both; animation-delay: calc(var(--i, 0) * .32s + .3s); }
+.slide.visible .cub.drop > .face { animation: faceIn .5s ease both; animation-delay: calc(var(--i, 0) * .32s + .3s); }
+@keyframes layerDrop { from { transform: translateZ(260px); } to { transform: translateZ(0); } }
+/* faceIn fades to each face's own resting opacity (--o), so ghost/glow faces stay translucent */
+.face { --o: 1; }
+@keyframes faceIn { from { opacity: 0; } to { opacity: var(--o); } }
+
+
+/* === 3D EXTRAS (glow, ghost, float, mesh, hide) === */
+.scene { transition: transform .6s var(--ease); }
+.scene.dragging { transition: none; }
+.face.bottom { background: linear-gradient(rgba(0,0,0,.45), rgba(0,0,0,.45)), var(--c); }
+.cub.ghost .face { --o: .22; opacity: .22; }
+.cub.glow .face { --o: .4; background: var(--c); opacity: .4; box-shadow: 0 0 24px var(--c); animation: glowPulse 1.8s ease-in-out infinite; }
+@keyframes glowPulse { 50% { opacity: .7; } }
+.cub.hide { display: none; }
+.slide.visible .cub.float { animation: bob 2.4s ease-in-out infinite; }
+.cub.float:nth-child(3n) { animation-delay: -.8s; } .cub.float:nth-child(3n+1) { animation-delay: -1.6s; }
+@keyframes bob { 50% { transform: translateZ(26px); } }
+.cub.mesh .face { background-image: linear-gradient(rgba(255,235,180,.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,235,180,.5) 1px, transparent 1px); background-size: 24px 24px; background-color: var(--c); }
+.cub.ghost.mesh .face { --o: .3; opacity: .3; }
+.slide.visible .cub.drop { animation-duration: .8s; animation-delay: calc(var(--i, 0) * .16s + .05s); }
+.slide.visible .cub.drop > .face { animation-delay: calc(var(--i, 0) * .16s + .05s); }
+.slide.visible .cub.glow.drop > .face { animation: faceIn .5s ease both, glowPulse 1.8s ease-in-out infinite; }
+
+/* === SLIDE CHROME (header, titles) === */
+.slide { color: var(--text); font-family: var(--body);
+  background: radial-gradient(ellipse 1100px 800px at 72% 58%, rgba(255,176,0,.10), transparent 70%), var(--slide-bg); }
+.slide::after { content: ''; position: absolute; inset: 0; pointer-events: none; opacity: .5;
+  background-image: linear-gradient(rgba(255,176,0,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,176,0,.05) 1px, transparent 1px); background-size: 64px 64px; }
+.hdr { position: absolute; left: 96px; right: 96px; top: 52px; display: flex; justify-content: space-between; font: 500 18px/1 var(--mono); letter-spacing: .16em; color: var(--amber); z-index: 2; }
+.hdr span:first-child::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-right: 14px; background: var(--amber); box-shadow: 0 0 14px var(--amber); vertical-align: -1px; }
+h2 { position: absolute; left: 96px; top: 98px; font: 700 64px/1.1 var(--display); text-transform: uppercase; letter-spacing: -.005em; z-index: 2; }
+h2 span { color: var(--amber); text-shadow: 0 0 34px rgba(255,176,0,.4); }
+.thsub { position: absolute; left: 96px; top: 182px; font: 500 28px/1.3 var(--body); color: var(--muted); z-index: 2; }
+
+/* === LEFT TEXT COLUMN === */
+.col { position: absolute; left: 96px; top: 262px; width: 740px; bottom: 60px; display: flex; flex-direction: column; gap: 14px; z-index: 2; }
+.item { border-left: 3px solid rgba(255,176,0,.5); padding: 8px 0 8px 20px; }
+.item b { display: block; font: 600 22px/1.2 var(--display); color: var(--amber); margin-bottom: 4px; letter-spacing: .01em; }
+.item p { font: 400 19.5px/1.42 var(--body); }
+.lede { font: 500 22px/1.45 var(--body); color: var(--text); padding: 16px 20px; background: var(--amber-10); border: 1.5px solid var(--amber-30); }
+.lede em { font-style: normal; color: var(--amber); font-family: var(--display); font-weight: 600; }
+.pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.pills span { font: 500 16px/1 var(--mono); padding: 8px 12px; border: 1.5px solid var(--amber-30); color: var(--text); }
+.pills span em { font-style: normal; color: var(--amber); margin-right: 8px; }
+.note { font: 400 16px/1.4 var(--mono); color: var(--muted); letter-spacing: .04em; }
+table.cmp { width: 100%; border-collapse: collapse; font: 400 18px/1.3 var(--body); margin-top: 4px; }
+table.cmp th { font: 600 17px/1 var(--display); color: var(--amber); text-align: left; padding: 10px 12px; border-bottom: 1.5px solid var(--amber); letter-spacing: .04em; }
+table.cmp td { padding: 11px 12px; border-bottom: 1px solid rgba(255,176,0,.18); }
+table.cmp td:first-child { color: var(--muted); font-family: var(--mono); font-size: 15px; letter-spacing: .06em; }
+
+/* Step list (lab / NMOS slides), synced with the 3D widget */
+ol.steps { list-style: none; display: flex; flex-direction: column; gap: 6px; counter-reset: s; }
+ol.steps li { counter-increment: s; display: flex; gap: 16px; align-items: baseline; padding: 10px 14px; border: 1.5px solid rgba(255,176,0,.16); cursor: pointer; font: 400 19px/1.35 var(--body); transition: background .25s, border-color .25s; }
+ol.steps li::before { content: counter(s, decimal-leading-zero); font: 500 15px/1 var(--mono); color: var(--muted); min-width: 26px; }
+ol.steps li b { font: 600 19px/1.2 var(--display); color: var(--amber); margin-right: 6px; }
+ol.steps li:hover { border-color: var(--amber-30); }
+ol.steps li.on { background: var(--amber); border-color: var(--amber); color: #12100c; }
+ol.steps li.on b, ol.steps li.on::before { color: #12100c; }
+ol.steps.tight li { padding: 7px 14px; font-size: 18px; }
+
+/* === 3D LAB PANEL === */
+.lab, .panel { position: absolute; left: 880px; top: 236px; width: 944px; height: 780px; border: 1.5px solid var(--amber-30); z-index: 2;
+  background: linear-gradient(rgba(255,176,0,.035), rgba(255,176,0,.01)); }
+.lab .viewer { left: 0; top: 0; width: 100%; height: 540px; overflow: hidden; }
+.lab:not(.bare) .scene { top: 64%; }
+.lab .legend { position: absolute; left: 16px; top: 14px; right: 150px; display: flex; flex-wrap: wrap; gap: 6px; z-index: 3; pointer-events: none; }
+.lab .chip { pointer-events: auto; display: inline-flex; align-items: center; gap: 8px; font: 500 14px/1 var(--mono); color: var(--text); background: rgba(18,16,12,.82); border: 1px solid var(--amber-30); padding: 6px 10px; cursor: pointer; }
+.lab .chip i { width: 12px; height: 12px; display: inline-block; }
+.lab .chip.off { opacity: .4; text-decoration: line-through; }
+.lab .hint { position: absolute; right: 16px; top: 18px; font: 500 13px/1 var(--mono); letter-spacing: .16em; color: var(--muted); z-index: 3; }
+.lab-foot { position: absolute; left: 0; right: 0; top: 540px; bottom: 0; padding: 14px 20px 18px; display: flex; flex-direction: column; gap: 12px; border-top: 1.5px solid var(--amber-30); background: rgba(18,16,12,.6); }
+.ctrl { display: flex; flex-wrap: wrap; }
+.ctrl button { font: 500 16px/1 var(--mono); letter-spacing: .06em; color: var(--muted); background: transparent; border: 1.5px solid rgba(255,176,0,.45); margin: 0 -1.5px -1.5px 0; padding: 12px 15px; cursor: pointer; transition: background .2s, color .2s; }
+.ctrl button:hover { color: var(--text); background: var(--amber-10); }
+.ctrl button.on { background: var(--amber); color: #12100c; border-color: var(--amber); }
+.ctrl button.play { margin-left: auto; color: var(--amber); }
+.ctrl button.counter { color: var(--text); cursor: default; min-width: 150px; }
+.params { display: flex; flex-wrap: wrap; gap: 6px; }
+.params:empty { display: none; }
+.params span { font: 500 14px/1 var(--mono); padding: 6px 10px; background: var(--amber-10); color: var(--text); }
+.params em { font-style: normal; color: var(--amber); margin-right: 8px; letter-spacing: .08em; }
+.cap { font: 400 19px/1.45 var(--body); color: var(--text); }
+.lab.bare { border: 0; background: none; }
+.lab.bare .viewer { height: 100%; }
+.lab.bare .legend, .lab.bare .hint { display: none; }
+
+/* === REVEAL ANIMATIONS === */
+.reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+.visible .reveal { opacity: 1; transform: none; }
+.visible .reveal.d1 { transition-delay: .08s; } .visible .reveal.d2 { transition-delay: .16s; } .visible .reveal.d3 { transition-delay: .24s; }
+.visible .col > .reveal:nth-child(1) { transition-delay: .1s; } .visible .col > .reveal:nth-child(2) { transition-delay: .17s; }
+.visible .col > .reveal:nth-child(3) { transition-delay: .24s; } .visible .col > .reveal:nth-child(4) { transition-delay: .31s; }
+.visible .col > .reveal:nth-child(5) { transition-delay: .38s; } .visible .col > .reveal:nth-child(6) { transition-delay: .45s; }
+
+/* === TITLE SLIDE === */
+.t-wafer { position: absolute; left: 1000px; top: 60px; width: 960px; height: 960px; border-radius: 50%; border: 2px solid rgba(255,176,0,.35);
+  background-image: linear-gradient(rgba(255,176,0,.16) 2px, transparent 2px), linear-gradient(90deg, rgba(255,176,0,.16) 2px, transparent 2px); background-size: 64px 64px;
+  -webkit-mask: radial-gradient(circle, #000 66%, transparent 70%); mask: radial-gradient(circle, #000 66%, transparent 70%); }
+.t-tag { position: absolute; left: 110px; top: 110px; display: flex; gap: 18px; align-items: center; font: 500 20px/1 var(--mono); letter-spacing: .16em; color: var(--amber); }
+.t-tag i { width: 14px; height: 14px; background: var(--amber); box-shadow: 0 0 18px var(--amber); animation: blink 1.6s steps(2) infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.t-th { position: absolute; left: 110px; top: 200px; font: 500 36px/1.4 var(--body); color: var(--muted); }
+.title-slide h1 { position: absolute; left: 110px; top: 286px; width: 940px; font: 700 90px/1.0 var(--display); text-transform: uppercase; letter-spacing: -.01em; }
+.title-slide h1 span { color: var(--amber); text-shadow: 0 0 40px rgba(255,176,0,.45); }
+.t-steps { position: absolute; left: 110px; top: 836px; display: flex; font: 500 19px/1 var(--mono); letter-spacing: .08em; }
+.t-steps div { padding: 16px 22px; border: 1.5px solid rgba(255,176,0,.45); margin-right: -1.5px; color: var(--muted); }
+.t-steps div:first-child { background: var(--amber); color: #12100c; border-color: var(--amber); }
+.t-foot { position: absolute; left: 110px; bottom: 84px; font: 400 20px/1 var(--mono); color: var(--muted); letter-spacing: .1em; }
+.title-slide .lab, .closing .lab { left: 1040px; top: 100px; width: 880px; height: 880px; }
+
+/* === COURSE MAP TILES === */
+.flow { position: absolute; left: 96px; right: 96px; top: 262px; display: flex; font: 500 17px/1 var(--mono); letter-spacing: .12em; }
+.flow div { flex: var(--f); padding: 14px 18px; border: 1.5px solid var(--amber-30); margin-right: -1.5px; color: var(--amber); background: var(--amber-10); }
+.tiles { position: absolute; left: 96px; right: 96px; top: 336px; bottom: 72px; display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: 1fr 1fr; gap: 18px; }
+.tile { position: relative; border: 1.5px solid var(--amber-30); padding: 26px 26px 22px; cursor: pointer; overflow: hidden; transition: background .25s, border-color .25s, transform .25s; background: rgba(18,16,12,.7); }
+.tile:hover { background: var(--amber-10); border-color: var(--amber); transform: translateY(-4px); }
+.tile .n { font: 500 18px/1 var(--mono); color: var(--amber); letter-spacing: .14em; }
+.tile b { display: block; margin-top: 22px; font: 700 34px/1.05 var(--display); text-transform: uppercase; }
+.tile .th { display: block; margin-top: 10px; font: 500 21px/1.3 var(--body); color: var(--muted); }
+.tile p { position: absolute; left: 26px; right: 26px; bottom: 22px; font: 400 18px/1.4 var(--body); }
+.tile .die { position: absolute; right: -30px; top: -30px; width: 130px; height: 130px; opacity: .25; background-image: linear-gradient(var(--amber) 2px, transparent 2px), linear-gradient(90deg, var(--amber) 2px, transparent 2px); background-size: 26px 26px; }
+
+/* === TEST SLIDE: bathtub curve + test chain === */
+.panel { padding: 22px 26px; }
+.panel .ph { display: flex; justify-content: space-between; align-items: center; font: 500 16px/1 var(--mono); letter-spacing: .14em; color: var(--amber); }
+.panel .ph button { font: 500 16px/1 var(--mono); letter-spacing: .06em; padding: 11px 16px; background: transparent; color: var(--amber); border: 1.5px solid rgba(255,176,0,.55); cursor: pointer; }
+.panel .ph button.on { background: var(--amber); color: #12100c; }
+.tub { display: block; width: 892px; height: 430px; margin-top: 10px; }
+.tub .ax { stroke: var(--muted); stroke-width: 2; fill: none; }
+.tub .curve { stroke: var(--amber); stroke-width: 5; fill: none; stroke-dasharray: 1400; stroke-dashoffset: 1400; filter: drop-shadow(0 0 8px rgba(255,176,0,.6)); }
+.visible .tub .curve { animation: draw 2.2s .3s var(--ease) forwards; }
+@keyframes draw { to { stroke-dashoffset: 0; } }
+.tub text { font: 500 17px var(--mono); fill: var(--text); letter-spacing: .06em; }
+.tub text.m { fill: var(--muted); font-size: 15px; }
+.tub .zone { fill: rgba(255,176,0,.06); }
+.tub .burn { fill: url(#hatch); opacity: 0; transition: opacity .5s; }
+.tub .burnlab { opacity: 0; transition: opacity .5s; fill: var(--amber); }
+.tub.burnin .burn, .tub.burnin .burnlab { opacity: 1; }
+.tub.burnin .early { opacity: .25; transition: opacity .5s; }
+.chain { position: relative; display: flex; justify-content: space-between; margin-top: 18px; }
+.chain::before { content: ''; position: absolute; left: 60px; right: 60px; top: 38px; height: 2px; background: var(--amber-30); }
+.chain .dot { position: absolute; top: 33px; left: 60px; width: 12px; height: 12px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 16px var(--amber); animation: travel 3s linear infinite; }
+@keyframes travel { from { left: 60px; } to { left: calc(100% - 72px); } }
+.chain .node { position: relative; width: 190px; text-align: center; }
+.chain .node i { display: block; margin: 0 auto; width: 76px; height: 76px; border: 1.5px solid var(--amber); background: #12100c; font: 600 26px/76px var(--display); font-style: normal; color: var(--amber); }
+.chain .node span { display: block; margin-top: 12px; font: 500 15px/1.3 var(--mono); letter-spacing: .06em; }
+.chain .cool { position: absolute; right: 0; top: 140px; width: 190px; text-align: center; font: 500 14px/1.3 var(--mono); color: var(--muted); }
+
+/* === PATH LENGTH BARS (flip chip slide) === */
+.bars { display: flex; flex-direction: column; gap: 12px; margin-top: 4px; }
+.bars div { font: 500 15px/1 var(--mono); letter-spacing: .06em; color: var(--muted); }
+.bars i { display: block; height: 14px; margin-top: 8px; background: var(--amber); box-shadow: 0 0 14px rgba(255,176,0,.5); width: 0; transition: width 1.4s var(--ease) .4s; }
+.visible .bars i { width: var(--w); }
+
+/* === CLOSING === */
+.closing h1 { position: absolute; left: 110px; top: 150px; font: 700 150px/1 var(--display); color: var(--amber); text-shadow: 0 0 60px rgba(255,176,0,.45); }
+.recap { position: absolute; left: 110px; top: 360px; width: 860px; display: grid; grid-template-columns: 1fr 1fr; gap: 14px 30px; }
+.recap div { border-left: 3px solid rgba(255,176,0,.5); padding: 6px 0 6px 16px; font: 400 18px/1.4 var(--body); }
+.recap b { display: block; font: 600 20px/1.2 var(--display); color: var(--amber); margin-bottom: 2px; }
+
+/* === DECK CHROME (outside the stage) === */
+.progress { position: fixed; left: 0; top: 0; height: 3px; background: var(--amber); box-shadow: 0 0 10px var(--amber); z-index: 1000; transition: width .4s var(--ease); }
+.counter-ui { position: fixed; right: 18px; bottom: 14px; font: 500 13px/1 var(--mono); letter-spacing: .14em; color: var(--muted); z-index: 1000; }
+.edit-hotzone { position: fixed; top: 0; left: 0; width: 80px; height: 80px; z-index: 10000; cursor: pointer; }
+.edit-toggle { position: fixed; top: 16px; left: 16px; z-index: 10001; font: 500 13px/1 var(--mono); letter-spacing: .1em; padding: 10px 12px; background: #12100c; color: var(--amber); border: 1.5px solid var(--amber); opacity: 0; pointer-events: none; transition: opacity .3s; cursor: pointer; }
+.edit-toggle.show, .edit-toggle.active { opacity: 1; pointer-events: auto; }
+.edit-toggle.active { background: var(--amber); color: #12100c; }
+body.editing [contenteditable="true"] { outline: 1.5px dashed rgba(255,176,0,.6); outline-offset: 4px; }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<div class="counter-ui" id="counterUi"></div>
+<div class="edit-hotzone" id="editHotzone"></div>
+<button class="edit-toggle" id="editToggle" title="Edit mode (E)">EDIT · E</button>
+
+<div class="deck-viewport">
+<main class="deck-stage" id="deckStage">
+
+<!-- ===== 01 TITLE ===== -->
+<section class="slide title-slide">
+  <div class="t-wafer"></div>
+  <div class="t-tag reveal"><i></i>BOC690042 · KMUTNB</div>
+  <div class="t-th reveal d1">เอกสารประกอบการอบรม · 26–27 ต.ค. 2569</div>
+  <h1 class="reveal d2">Wafer <span>Fabrication</span> &amp; Semiconductor Processing Bootcamp</h1>
+  <div class="t-steps reveal d3"><div>OXIDATION</div><div>LITHO</div><div>ETCH</div><div>DEPO</div><div>METAL</div><div>PACKAGE</div><div>TCAD</div></div>
+  <div class="t-foot">DRAG THE DEVICE · SCROLL TO ZOOM · → NEXT</div>
+  <div class="lab bare" id="w-title" data-w="title"></div>
+</section>
+
+<!-- ===== 02 COURSE MAP ===== -->
+<section class="slide">
+  <div class="hdr"><span>00 · COURSE MAP</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">From bare silicon to <span>packaged chip</span></h2>
+  <div class="thsub reveal d1">แผนที่หลักสูตร · คลิกการ์ดเพื่อไปยังหัวข้อ</div>
+  <div class="flow reveal d2"><div style="--f:4">FEOL · FRONT-END</div><div style="--f:1">BEOL</div><div style="--f:2">TEST · PACKAGE</div><div style="--f:1">SIMULATION</div></div>
+  <div class="tiles">
+    <div class="tile reveal" data-goto="2"><i class="die"></i><span class="n">01</span><b>Oxidation</b><span class="th">การออกซิเดชัน</span><p>Grow SiO₂: dry, wet and radical oxidation.</p></div>
+    <div class="tile reveal d1" data-goto="3"><i class="die"></i><span class="n">02</span><b>Photo&shy;lithography</b><span class="th">การถ่ายแบบลวดลายด้วยแสง</span><p>Print the mask pattern with 193 nm light.</p></div>
+    <div class="tile reveal d2" data-goto="4"><i class="die"></i><span class="n">03</span><b>Etch</b><span class="th">การกัด</span><p>Dig the pattern: isotropic vs anisotropic.</p></div>
+    <div class="tile reveal d3" data-goto="5"><i class="die"></i><span class="n">04</span><b>Deposition</b><span class="th">การสะสมฟิล์มบาง</span><p>Step coverage, gap fill, CVD and ALD.</p></div>
+    <div class="tile reveal" data-goto="7"><i class="die"></i><span class="n">05</span><b>Metallization</b><span class="th">การเชื่อมต่อโลหะ</span><p>Cu layers and vias wire up the devices.</p></div>
+    <div class="tile reveal d1" data-goto="8"><i class="die"></i><span class="n">06</span><b>Test</b><span class="th">การทดสอบ</span><p>Test types, probe system, burn-in.</p></div>
+    <div class="tile reveal d2" data-goto="9"><i class="die"></i><span class="n">07</span><b>Package</b><span class="th">บรรจุภัณฑ์</span><p>Levels, types, flip chip, HBM, chiplets.</p></div>
+    <div class="tile reveal d3" data-goto="14"><i class="die"></i><span class="n">08</span><b>TCAD · Lab</b><span class="th">การจำลองและปฏิบัติการ</span><p>OpenTCAD labs and a planar NMOS build.</p></div>
+  </div>
+</section>
+
+<!-- ===== 03 OXIDATION ===== -->
+<section class="slide">
+  <div class="hdr"><span>01 · OXIDATION</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Oxidation</span> Process</h2>
+  <div class="thsub reveal d1">การออกซิเดชัน · การสร้างชั้น SiO₂ บนผิวซิลิคอน</div>
+  <div class="col">
+    <div class="item reveal"><b>Gate oxide formation</b><p>Forms the insulating oxide between gate and channel that controls MOSFET current flow.</p></div>
+    <div class="item reveal"><b>Batch furnace</b><p>Vertically stacks production and dummy wafers and exposes them to reactant gases at high temperature.</p></div>
+    <div class="item reveal"><b>Wet oxidation</b><p>H₂O vapour at atmospheric pressure, giving the fastest oxide growth rate.</p></div>
+    <div class="item reveal"><b>Dry oxidation</b><p>O₂ (often diluted with N₂) at atmospheric pressure: a moderate rate and higher film density.</p></div>
+    <div class="item reveal"><b>Radical oxidation</b><p>H₂ + O₂ below 1 Torr. Slow, but with superior control and conformal film quality.</p></div>
+    <div class="item reveal"><b>Why radicals</b><p>Uniform thickness on (100) and (110) Si (a = b), rounded stress corners, and they even oxidise stable Si₃N₄.</p></div>
+  </div>
+  <div class="lab" id="w-oxi" data-w="oxi"></div>
+</section>
+
+<!-- ===== 04 PHOTOLITHOGRAPHY ===== -->
+<section class="slide">
+  <div class="hdr"><span>02 · PHOTOLITHOGRAPHY</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Photolithography</span> Process</h2>
+  <div class="thsub reveal d1">โฟโตลิโทกราฟี · การถ่ายแบบลวดลายด้วยแสง</div>
+  <div class="col">
+    <div class="lede reveal">Like a cookie cutter stamping identical shapes: <em>cookie cutter = photomask</em>, <em>cover = mask</em>, and making the mask is the photo process.</div>
+    <div class="item reveal"><b>Photoresist (PR)</b><p>Coated on the wafer, exposed through a photomask, then developed. Light changes its solubility in the developer.</p></div>
+    <div class="item reveal"><b>Positive vs negative</b><p>Positive: exposed areas dissolve, suiting fine patterns. Negative: exposed areas cure and remain but swell.</p></div>
+    <div class="item reveal"><b>Batch spraying</b><p>Like colouring many snacks on one board at once: identical patterns quickly, without colouring each by hand.</p></div>
+    <div class="item reveal"><b>Larger lens → higher NA</b><p>Collects more diffracted light (3–5 rays), raising the numerical aperture and improving resolution.</p></div>
+    <div class="item reveal"><b>ArF immersion + top coat</b><p>Water replaces air to raise the refractive index and NA, and a waterproof top coat protects the PR. Finer patterns at the same 193 nm.</p></div>
+  </div>
+  <div class="lab" id="w-litho" data-w="litho"></div>
+</section>
+
+<!-- ===== 05 ETCH ===== -->
+<section class="slide">
+  <div class="hdr"><span>03 · ETCH</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Etch</span> Process</h2>
+  <div class="thsub reveal d1">การกัด · ขุดลวดลายลงในชั้นวัสดุ</div>
+  <div class="col">
+    <div class="item reveal"><b>Etching</b><p>The PR mold protects the pattern. Material reacts only where it is unmasked, digging the pattern into the layer.</p></div>
+    <div class="item reveal"><b>Filling</b><p>Like chocolate syrup poured into the hollow: the trench is filled and the excess cleared before the next layer.</p></div>
+    <div class="item reveal"><b>Isotropic</b><p>Etches in all directions and undercuts below the PR. High selectivity and speed, but poor precision.</p></div>
+    <div class="item reveal"><b>Anisotropic</b><p>Etches vertically only and keeps the pattern as drawn. Lower selectivity and speed.</p></div>
+    <div class="item reveal"><b>Selectivity</b><p>Gas and plasma conditions decide which material is removed, enabling selective etching of specific layers.</p></div>
+  </div>
+  <div class="lab" id="w-etch" data-w="etch"></div>
+</section>
+
+<!-- ===== 06 DEPOSITION ===== -->
+<section class="slide">
+  <div class="hdr"><span>04 · DEPOSITION</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Deposition</span> · Step Coverage</h2>
+  <div class="thsub reveal d1">การสะสมฟิล์มบาง · ความครอบคลุมขั้นบันไดและการเติมช่อง</div>
+  <div class="col">
+    <div class="item reveal"><b>Deposition</b><p>Chocolate syrup is applied into the etched hollow, and a new cookie layer is laid over it.</p></div>
+    <div class="item reveal"><b>Purpose</b><p>Thin films of different materials are added layer by layer on the wafer, enabling miniaturisation.</p></div>
+    <div class="item reveal"><b>Step coverage</b><p>Sidewall (b/a) and bottom (c/a) film thickness relative to the top. The closer to 1, the more uniform.</p></div>
+    <div class="item reveal"><b>Poor coverage</b><p>Thinner sidewall and bottom films (ratio below 1), since deposition can't be guaranteed on uneven surfaces.</p></div>
+    <div class="item reveal"><b>Gap fill</b><p>Poor fill pinches off the trench opening and traps voids. Excellent fill leaves almost none.</p></div>
+  </div>
+  <div class="lab" id="w-depo" data-w="depo"></div>
+</section>
+
+<!-- ===== 07 CVD vs ALD ===== -->
+<section class="slide">
+  <div class="hdr"><span>04 · DEPOSITION</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>CVD</span> vs <span>ALD</span></h2>
+  <div class="thsub reveal d1">การสะสมไอเคมี เทียบกับ การสะสมชั้นอะตอม</div>
+  <div class="col">
+    <div class="item reveal"><b>Conventional CVD</b><p>Source and reactant gases are supplied together, so the film grows continuously and fast through adsorption, surface diffusion and reaction.</p></div>
+    <div class="item reveal"><b>Atomic Layer Deposition (ALD)</b><p>Source, purge, reactant and purge gases are supplied in sequence, so one cycle deposits exactly one atomic layer.</p></div>
+    <table class="cmp reveal">
+      <tr><th></th><th>CVD</th><th>ALD</th></tr>
+      <tr><td>GAS SUPPLY</td><td>Together</td><td>Sequential pulses + purge</td></tr>
+      <tr><td>GROWTH</td><td>Continuous</td><td>1 atomic layer / cycle</td></tr>
+      <tr><td>SPEED</td><td>Fast</td><td>Slow (cycle-limited)</td></tr>
+      <tr><td>THICKNESS</td><td>Set by time</td><td>Set by cycle count</td></tr>
+    </table>
+  </div>
+  <div class="lab" id="w-ald" data-w="ald"></div>
+</section>
+
+<!-- ===== 08 METALLIZATION ===== -->
+<section class="slide">
+  <div class="hdr"><span>05 · METALLIZATION</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Metallization</span> · Interconnect</h2>
+  <div class="thsub reveal d1">การเชื่อมต่อโลหะ · Metal Interconnection</div>
+  <div class="col">
+    <div class="item reveal"><b>Process order</b><p>Devices are formed first in FEOL at the bottom. Manufacturing then proceeds upward through BEOL, where Cu layers and vias connect device to device.</p></div>
+    <div class="item reveal"><b>Role</b><p>Metallization gives the chip its purpose by wiring billions of isolated devices into working circuits.</p></div>
+    <div class="item reveal"><b>I/O terminals</b><p>The top layer ends in input/output terminals such as solder bumps for packaging.</p></div>
+    <div class="item reveal"><b>Memory cell array</b><p>Word lines and bit lines are the metal wiring that links each cell to its control signals.</p></div>
+    <div class="note reveal">Use ▶ PLAY to watch the stack build from FEOL to bumps.</div>
+  </div>
+  <div class="lab" id="w-metal" data-w="metal"></div>
+</section>
+
+<!-- ===== 09 TEST ===== -->
+<section class="slide">
+  <div class="hdr"><span>06 · TEST</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>Test</span> &amp; Reliability</h2>
+  <div class="thsub reveal d1">การทดสอบและความน่าเชื่อถือ</div>
+  <div class="col">
+    <div class="item reveal"><b>Purpose</b><p>The main goal of testing is to prevent defective products from shipping.</p></div>
+    <div class="item reveal"><b>Test types</b><div class="pills"><span><em>TEMP</em>Hot · Cold · Room</span><span><em>SPEED</em>Core · Speed</span><span><em>OPERATION</em>DC · AC · Function</span></div></div>
+    <div class="item reveal"><b>Test system</b><p>Signals pass from the test system through the tester head and probe card to the wafer on the prober, and a cooler controls temperature.</p></div>
+    <div class="item reveal"><b>Bathtub curve</b><p>Failure rate is high early (manufacturing defects), low and steady during useful life (random defects), and rises again at wear-out.</p></div>
+    <div class="item reveal"><b>Burn-in</b><p>Temperature and voltage stress exposes latent defects in advance, so early failures are screened out before shipment.</p></div>
+  </div>
+  <div class="panel">
+    <div class="ph"><span>FAILURE RATE vs TIME</span><button id="burnBtn">APPLY BURN-IN</button></div>
+    <svg class="tub" id="tub" viewBox="0 0 892 430">
+      <defs><pattern id="hatch" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="14" fill="rgba(255,176,0,.35)"/></pattern></defs>
+      <rect class="zone" x="70" y="20" width="170" height="350"/><rect class="zone" x="700" y="20" width="170" height="350"/>
+      <rect class="burn" x="70" y="20" width="170" height="350"/>
+      <path class="ax" d="M70 20 V370 H880"/>
+      <path class="curve" d="M76 40 C110 250 170 330 240 340 L700 340 C770 338 820 290 872 90"/>
+      <path class="early ax" d="M240 20 V370" stroke-dasharray="6 8"/><path class="ax" d="M700 20 V370" stroke-dasharray="6 8"/>
+      <text x="96" y="400">EARLY FAILURE</text><text x="380" y="400">USEFUL LIFE</text><text x="740" y="400">WEAR-OUT</text>
+      <text class="m" x="96" y="424">manufacturing defects</text><text class="m" x="392" y="424">random defects</text><text class="m" x="752" y="424">ageing</text>
+      <text class="m" x="20" y="200" transform="rotate(-90 20 200)">FAILURE RATE</text>
+      <text class="burnlab" x="84" y="60">SCREENED BY BURN-IN</text>
+    </svg>
+    <div class="chain">
+      <div class="dot"></div>
+      <div class="node"><i>TS</i><span>TEST SYSTEM</span></div>
+      <div class="node"><i>TH</i><span>TESTER HEAD</span></div>
+      <div class="node"><i>PC</i><span>PROBE CARD</span></div>
+      <div class="node"><i>W</i><span>WAFER · PROBER</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 10 PACKAGE DEFINITION ===== -->
+<section class="slide">
+  <div class="hdr"><span>07 · PACKAGE</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Semiconductor <span>Package</span></h2>
+  <div class="thsub reveal d1">บรรจุภัณฑ์เซมิคอนดักเตอร์ · ระดับ บทบาท และแนวโน้ม</div>
+  <div class="col">
+    <div class="item reveal"><b>Package levels</b><p>L0 cut chips from the wafer · L1 package one chip · L2 mount on a module or card · L3 card on the motherboard. COB skips L1.</p></div>
+    <div class="item reveal"><b>Package forms</b><p>Most packages connect externally through solder balls (FBGA) or leads (TSOP), which serve as the pins.</p></div>
+    <div class="item reveal"><b>Four roles</b><div class="pills"><span>Mechanical protection</span><span>Electrical connection</span><span>Mechanical connection</span><span>Heat dissipation</span></div><p style="margin-top:8px">EMC encases the chip to shield it from mechanical and chemical shock.</p></div>
+    <div class="item reveal"><b>Development trends</b><div class="pills"><span>Heat dissipation</span><span>High speed</span><span>3D stacking</span><span>Small form factor</span><span>High reliability</span><span>Low cost</span></div></div>
+    <div class="item reveal"><b>Development process</b><p>Chip design → feasibility review → package design (electrical, thermal, structural analysis) → fabrication → characterisation and reliability tests. Results feed back to chip designers.</p></div>
+  </div>
+  <div class="lab" id="w-pkg" data-w="pkg"></div>
+</section>
+
+<!-- ===== 11 PACKAGE TYPE I ===== -->
+<section class="slide">
+  <div class="hdr"><span>07 · PACKAGE</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Package <span>Type I</span></h2>
+  <div class="thsub reveal d1">ประเภทบรรจุภัณฑ์ I · Through-hole, SMT, BGA, LGA</div>
+  <div class="col">
+    <div class="item reveal"><b>Through-hole · DIP, ZIP</b><p>Leads are inserted into PCB holes. DIP has two rows of pins and ZIP a single zig-zag row.</p></div>
+    <div class="item reveal"><b>Surface mount · QFP/TQFP, TSOP, SOJ</b><p>Leads attach to the PCB surface: four sides (QFP), two sides gull-wing (TSOP) or J-shaped (SOJ), allowing more pins.</p></div>
+    <div class="item reveal"><b>BGA / FBGA</b><p>Solder balls are attached to the package substrate. This is the most common form of substrate-type package.</p></div>
+    <div class="item reveal"><b>LGA</b><p>The substrate has only flat ball lands with no solder balls, and it is becoming more common.</p></div>
+    <div class="item reveal"><b>Difference</b><p>BGA has solder balls on the substrate, while LGA has bare lands. Flip the BGA/LGA views to see the underside.</p></div>
+  </div>
+  <div class="lab" id="w-ptype" data-w="ptype"></div>
+</section>
+
+<!-- ===== 12 PACKAGE TYPE II ===== -->
+<section class="slide">
+  <div class="hdr"><span>07 · PACKAGE</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Package <span>Type II</span> · Flip Chip</h2>
+  <div class="thsub reveal d1">ประเภทบรรจุภัณฑ์ II · Wire bonding เทียบกับ Flip chip</div>
+  <div class="col">
+    <div class="item reveal"><b>Standard FBGA</b><p>The chip is connected to the substrate by bonding wires, so the signal takes a longer path.</p></div>
+    <div class="item reveal"><b>Flip chip</b><p>Bumps are formed on the chip's pads, then the chip is flipped and attached directly to the substrate: a short, direct path.</p></div>
+    <div class="item reveal"><b>Benefit</b><p>Shorter wiring improves electrical performance and lets the package be thinner.</p></div>
+    <div class="item reveal"><b>Signal path (illustrative)</b><div class="bars"><div>WIRE BOND · pad → wire → finger → via → ball<i style="--w:100%"></i></div><div>FLIP CHIP · bump → via → ball<i style="--w:34%"></i></div></div></div>
+  </div>
+  <div class="lab" id="w-flip" data-w="flip"></div>
+</section>
+
+<!-- ===== 13 STACKING ===== -->
+<section class="slide">
+  <div class="hdr"><span>07 · PACKAGE</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Chip <span>Stacking</span> · TSV · HBM</h2>
+  <div class="thsub reveal d1">การเรียงซ้อนชิป · Wire bonding, TSV, HBM และ 2.5D</div>
+  <div class="col">
+    <div class="item reveal"><b>Wire bonding stack</b><p>Stacked chips are connected by wires, and capacity grows with the number of chips.</p></div>
+    <div class="item reveal"><b>TSV stack</b><p>Vertical through-silicon electrodes replace wires, giving better performance and a smaller package.</p></div>
+    <div class="item reveal"><b>HBM stack</b><p>DRAM dies are stacked vertically and connected through TSVs and micro-bumps, so signals pass between dies without wires.</p></div>
+    <div class="item reveal"><b>2.5D structure</b><p>The DRAM stack and logic die sit side by side on an interposer (PHY areas), which connects to the package substrate through bumps and BGA balls.</p></div>
+  </div>
+  <div class="lab" id="w-stack" data-w="stack"></div>
+</section>
+
+<!-- ===== 14 CHIPLET ===== -->
+<section class="slide">
+  <div class="hdr"><span>07 · PACKAGE</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Monolithic vs <span>Chiplet</span></h2>
+  <div class="thsub reveal d1">ชิปเล็ตและการรวมระบบ · SoC เทียบกับ SiP</div>
+  <div class="col">
+    <div class="item reveal"><b>Monolithic</b><p>A single comprehensive chip integrates all functional logic blocks (CPU, GPU, modem, SRAM).</p></div>
+    <div class="item reveal"><b>Chiplet</b><p>Functional blocks are split into separate dies, each on its best-fit process node, then integrated through advanced packaging like TSV.</p></div>
+    <div class="item reveal"><b>SoC</b><p>All functions on a single chip laid out in a plane, so signals travel a long horizontal path.</p></div>
+    <div class="item reveal"><b>SiP stacked with TSV</b><p>Multiple chips are stacked vertically in one package and connected through TSVs, so the signal path is much shorter.</p></div>
+  </div>
+  <div class="lab" id="w-chiplet" data-w="chiplet"></div>
+</section>
+
+<!-- ===== 15 TCAD ===== -->
+<section class="slide">
+  <div class="hdr"><span>08 · TCAD</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal"><span>TCAD</span> · Technology CAD</h2>
+  <div class="thsub reveal d1">การจำลองกระบวนการผลิตและอุปกรณ์ด้วยคอมพิวเตอร์</div>
+  <div class="col">
+    <div class="lede reveal">TCAD is a branch of <em>EDA</em> that uses physics-based computer simulations to model semiconductor fabrication processes and the electrical behaviour of devices.</div>
+    <div class="item reveal"><b>Process TCAD</b><p>Simulates foundry steps (ion implantation, diffusion, oxidation, deposition, etching, mechanical stress) to predict the wafer's physical structure.</p></div>
+    <div class="item reveal"><b>Device TCAD</b><p>Solves the Poisson, continuity and drift-diffusion equations on a discretised mesh to simulate current flow and thermal behaviour.</p></div>
+    <div class="item reveal"><b>Interconnect TCAD</b><p>Models the non-active parts of ICs to extract parasitics and evaluate signal interference and RC effects.</p></div>
+  </div>
+  <div class="lab" id="w-tcad" data-w="tcad"></div>
+</section>
+
+<!-- ===== 16 LAB 1 ===== -->
+<section class="slide">
+  <div class="hdr"><span>08 · OPENTCAD LAB 1</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Lab 1 · <span>Mask &amp; Deposition</span></h2>
+  <div class="thsub reveal d1">ปฏิบัติการ OpenTCAD 1 · คลิกขั้นตอนเพื่อดูผลแบบ 3 มิติ</div>
+  <div class="col">
+    <ol class="steps reveal" data-for="w-lab1">
+      <li><span><b>Create Wafer</b>New Project "TEST" → Create Wafer</span></li>
+      <li><span><b>Mask</b>TEST_MASK · rectangle (25,25)–(75,75) → Save</span></li>
+      <li><span><b>Deposition</b>HfO₂ · 5 nm · Mask None · Model all</span></li>
+      <li><span><b>Revert + mask</b>HfO₂ with TEST_MASK, Invert ☐</span></li>
+      <li><span><b>Invert mask</b>Invert ☑, film only inside the rectangle</span></li>
+      <li><span><b>Anisotropic Co</b>1 nm · vertical only (sputtering)</span></li>
+      <li><span><b>Isotropic Co</b>1 nm · also coats sidewalls (CVD / ALD)</span></li>
+    </ol>
+    <div class="note reveal">The 5 step types are Deposition, Etch, CMP, Coating and Epitaxy. A mask rectangle is a protected area (shadow mask).</div>
+  </div>
+  <div class="lab" id="w-lab1" data-w="lab1"></div>
+</section>
+
+<!-- ===== 17 LAB 2 ===== -->
+<section class="slide">
+  <div class="hdr"><span>08 · OPENTCAD LAB 2</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Lab 2 · <span>Etch &amp; CMP</span></h2>
+  <div class="thsub reveal d1">ปฏิบัติการ OpenTCAD 2 · การกัดและการขัดผิวให้เรียบ</div>
+  <div class="col">
+    <ol class="steps reveal" data-for="w-lab2">
+      <li><span><b>Etch</b>15 nm · no mask</span></li>
+      <li><span><b>Masked etch</b>TEST_MASK · Anisotropic · Invert ☐</span></li>
+      <li><span><b>Invert mask</b>Only the masked area is etched</span></li>
+      <li><span><b>Isotropic etch</b>Compare simulation time and result</span></li>
+      <li><span><b>Cu_Block</b>Cu · 20 nm · TEST_MASK, Invert ☑</span></li>
+      <li><span><b>Passivation</b>Si₃N₄ · 50 nm · isotropic</span></li>
+      <li><span><b>CMP</b>Polish until a new material interface (Cu)</span></li>
+    </ol>
+    <div class="note reveal">Coating and epitaxy are skipped in this lecture (too much complex physics and chemistry).</div>
+  </div>
+  <div class="lab" id="w-lab2" data-w="lab2"></div>
+</section>
+
+<!-- ===== 18 PLANAR NMOS ===== -->
+<section class="slide">
+  <div class="hdr"><span>08 · OPENTCAD · NMOS</span><span>BOC690042 · KMUTNB</span></div>
+  <h2 class="reveal">Planar <span>NMOS</span> 3D Modelling</h2>
+  <div class="thsub reveal d1">ทรานซิสเตอร์ NMOS แบบระนาบ · 100 × 100 nm · ไม่มี Mesa Etch และการฝังไอออน</div>
+  <div class="col">
+    <ol class="steps tight reveal" data-for="w-nmos">
+      <li><span><b>S0</b>Blank wafer · Si 100×100×50 nm</span></li>
+      <li><span><b>S1</b>Masks · GATE · SPACER · CONTACT</span></li>
+      <li><span><b>S2</b>Gate oxide · HfO₂ 3 nm</span></li>
+      <li><span><b>S2</b>Metal gate · TiN 25 nm</span></li>
+      <li><span><b>S2</b>Gate etch · 28 nm · MASK_GATE</span></li>
+      <li><span><b>S3</b>Spacer · Si₃N₄ 10 nm</span></li>
+      <li><span><b>S3</b>Spacer etch · 10 nm · MASK_SPACER ☑</span></li>
+      <li><span><b>S4</b>ILD · SiO₂ 50 nm</span></li>
+      <li><span><b>S4</b>CMP · Model Gate_Metal · overpolish 0</span></li>
+      <li><span><b>S5</b>Contact etch · 20 nm · MASK_CONTACT ☑</span></li>
+      <li><span><b>S5</b>Metal electrodes · Cu 30 nm</span></li>
+      <li><span><b>S6</b>Verify regions (exploded view)</span></li>
+    </ol>
+  </div>
+  <div class="lab" id="w-nmos" data-w="nmos"></div>
+</section>
+
+<!-- ===== 19 CLOSING ===== -->
+<section class="slide closing">
+  <div class="hdr"><span>FINISHED</span><span>BOC690042 · KMUTNB</span></div>
+  <h1 class="reveal">FINISHED!!</h1>
+  <div class="recap">
+    <div class="reveal"><b>Oxidation</b>Dry · wet · radical SiO₂</div>
+    <div class="reveal"><b>Lithography</b>PR, mask, 193 nm, NA</div>
+    <div class="reveal"><b>Etch</b>Isotropic vs anisotropic</div>
+    <div class="reveal"><b>Deposition</b>Step coverage, CVD vs ALD</div>
+    <div class="reveal"><b>Metallization</b>FEOL → BEOL, Cu + vias</div>
+    <div class="reveal"><b>Test</b>Bathtub curve, burn-in</div>
+    <div class="reveal"><b>Package</b>FBGA, flip chip, HBM, chiplet</div>
+    <div class="reveal"><b>TCAD</b>OpenTCAD → planar NMOS</div>
+  </div>
+  <div class="lab bare" id="w-closing" data-w="closing"></div>
+</section>
+
+</main>
+</div>
+
+<script>
+/* ===========================================
+   3D ENGINE: CSS cuboids (no libraries)
+   World axes: X right, Y depth, Z up. Units are stage pixels.
+   =========================================== */
+const MAT = {
+  si: ['#7d8494', 'Si'], sio2: ['#e8d9a8', 'SiO₂'], hfo2: ['#8fb3a0', 'HfO₂'], pr: ['#c8553d', 'Photoresist'],
+  prx: ['#f2a27a', 'Exposed PR'], chrome: ['#26241f', 'Chrome (mask)'], glass: ['#cfe0f0', 'Mask glass'],
+  sin: ['#5a6b86', 'Si₃N₄'], tin: ['#c48a2c', 'TiN'], cu: ['#d9894a', 'Cu'], co: ['#a9b6d6', 'Co'],
+  light: ['#FFB000', '193 nm light'], o2: ['#e9eef7', 'O₂'], h2o: ['#62c6f0', 'H₂O vapour'], rad: ['#FFB000', 'O / OH radicals'],
+  gasA: ['#ffd36b', 'Source (precursor)'], gasB: ['#62c6f0', 'Reactant'], purge: ['#bfc6d6', 'N₂ purge'],
+  ald: ['#c9b27a', 'ALD layer'], ald2: ['#a8925e', 'ALD layer'], film: ['#e8d9a8', 'Deposited film'], void: ['#0b0a08', 'Void'],
+  ild: ['#e8d9a8', 'ILD (SiO₂)'], sub: ['#3d6b4f', 'Substrate / PCB'], emc: ['#3a3d45', 'EMC'], ball: ['#d4d0c4', 'Solder / lead'],
+  au: ['#f2c14e', 'Au wire'], land: ['#e0b04a', 'Land / finger'], dram: ['#6f7a91', 'DRAM die'], logic: ['#a08a5a', 'Logic die'],
+  inter: ['#4a4f5a', 'Interposer'], cpu: ['#d9894a', 'CPU'], gpu: ['#8fb3a0', 'GPU'], modem: ['#a9b6d6', 'Modem'], sram: ['#c8553d', 'SRAM'],
+  sig: ['#FFB000', 'Signal path'], cur: ['#FFB000', 'Channel current'], wl: ['#c48a2c', 'Word line'], bl: ['#d9894a', 'Bit line'],
+  cell: ['#5a6b86', 'Memory cell'], protect: ['#FFB000', 'Protected area'], removed: ['#9aa1b0', 'Removed volume']
+};
+const GLOW = new Set(['light', 'sig', 'cur', 'protect', 'purge', 'rad']);
+const GHOST = new Set(['glass', 'ild', 'removed']);
+
+/* Box from ranges: X(x1,x2, y1,y2, z1,z2, material, {g:ghost, cls}) */
+const X = (x1, x2, y1, y2, z1, z2, m, o = {}) => ({ x: x1, y: y1, z: z1, w: x2 - x1, d: y2 - y1, h: z2 - z1, m, ...o });
+/* 1-D complement: intervals of [lo,hi] not covered by `open` */
+const segs = (lo, hi, open) => { const out = []; let p = lo; [...open].sort((a, b) => a[0] - b[0]).forEach(([a, b]) => { if (a > p) out.push([p, a]); p = Math.max(p, b); }); if (p < hi) out.push([p, hi]); return out; };
+/* 2-D rectangle subtraction: [x1,x2,y1,y2] minus holes -> list of rects (grid decomposition, merged per row) */
+function rsub([x1, x2, y1, y2], holes) {
+  const xs = new Set([x1, x2]), ys = new Set([y1, y2]);
+  holes.forEach(([a, b, c, d]) => { [a, b].forEach(v => v > x1 && v < x2 && xs.add(v)); [c, d].forEach(v => v > y1 && v < y2 && ys.add(v)); });
+  const XS = [...xs].sort((a, b) => a - b), YS = [...ys].sort((a, b) => a - b), out = [];
+  for (let j = 0; j < YS.length - 1; j++) {
+    let run = null;
+    for (let i = 0; i < XS.length - 1; i++) {
+      const cx = (XS[i] + XS[i + 1]) / 2, cy = (YS[j] + YS[j + 1]) / 2;
+      const inHole = holes.some(([a, b, c, d]) => cx > a && cx < b && cy > c && cy < d);
+      if (inHole) { run = null; continue; }
+      if (run) run[1] = XS[i + 1]; else { run = [XS[i], XS[i + 1], YS[j], YS[j + 1]]; out.push(run); }
+    }
+  }
+  return out;
+}
+/* Deterministic pseudo-random particles (same seed -> same positions across steps) */
+function parts(m, n, seed, zr = [250, 360], xr = 220, yr = 130, s = 14) {
+  let q = seed * 9301 + 49297; const r = () => ((q = (q * 16807) % 2147483647) / 2147483647);
+  return Array.from({ length: n }, () => { const x = r() * 2 * xr - xr, y = r() * 2 * yr - yr, z = zr[0] + r() * (zr[1] - zr[0]); return X(x, x + s, y, y + s, z, z + s, m, { cls: 'float' }); });
+}
+/* Small DOM helper: el('div', 'cls', 'text') */
+const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+const W3D = {
+  /* Build one cuboid (6 faces) inside `p` */
+  cuboid(p, b) {
+    const g = el('div', 'cub' + (GLOW.has(b.m) ? ' glow' : '') + ((b.g || GHOST.has(b.m)) ? ' ghost' : '') + (b.cls ? ' ' + b.cls : ''));
+    g.dataset.m = b.m;
+    g.style.setProperty('--c', MAT[b.m][0]);
+    const { x, y, z, w, d, h } = b;
+    const face = (W, H, t, k) => { const f = el('div', 'face ' + k); f.style.width = W + 'px'; f.style.height = H + 'px'; f.style.transform = t; g.appendChild(f); };
+    face(w, d, `translate3d(${x}px,${y}px,${z + h}px)`, 'top');
+    face(w, d, `translate3d(${x}px,${y}px,${z}px)`, 'bottom');
+    face(w, h, `translate3d(${x}px,${y + d}px,${z + h}px) rotateX(-90deg)`, 'front');
+    face(w, h, `translate3d(${x}px,${y}px,${z + h}px) rotateX(-90deg)`, 'back');
+    face(d, h, `translate3d(${x + w}px,${y}px,${z + h}px) rotateZ(90deg) rotateX(-90deg)`, 'side');
+    face(d, h, `translate3d(${x}px,${y}px,${z + h}px) rotateZ(90deg) rotateX(-90deg)`, 'side');
+    p.appendChild(g);
+    return g;
+  },
+  /* Drag rotates, wheel zooms; set() animates to a camera; spin = idle auto-rotation */
+  orbit(viewer, scene, cam, spin) {
+    const st = { rz: cam.rz ?? -34, rx: cam.rx ?? 58, zoom: cam.zoom ?? 1 };
+    let start = null, touched = false;
+    const apply = () => { scene.style.setProperty('--rz', st.rz + 'deg'); scene.style.setProperty('--rx', st.rx + 'deg'); scene.style.setProperty('--zoom', st.zoom); };
+    viewer.addEventListener('pointerdown', e => { start = { x: e.clientX, y: e.clientY, rz: st.rz, rx: st.rx }; touched = true; scene.classList.add('dragging'); viewer.setPointerCapture(e.pointerId); e.stopPropagation(); });
+    viewer.addEventListener('pointermove', e => { if (!start) return; st.rz = start.rz + (e.clientX - start.x) * .4; st.rx = Math.max(-80, Math.min(88, start.rx - (e.clientY - start.y) * .3)); apply(); });
+    viewer.addEventListener('pointerup', () => { start = null; scene.classList.remove('dragging'); });
+    viewer.addEventListener('wheel', e => { e.preventDefault(); e.stopPropagation(); st.zoom = Math.max(.45, Math.min(2, st.zoom - e.deltaY * .001)); apply(); }, { passive: false });
+    ['touchstart', 'touchmove', 'touchend'].forEach(t => viewer.addEventListener(t, e => e.stopPropagation(), { passive: true }));
+    if (spin) { const tick = () => { if (!touched && viewer.closest('.slide').classList.contains('active')) { st.rz += .06; scene.classList.add('dragging'); apply(); } requestAnimationFrame(tick); }; requestAnimationFrame(tick); }
+    apply();
+    return { set(c) { if (!c) return; scene.classList.remove('dragging'); Object.assign(st, c); apply(); } };
+  }
+};
+
+/* ===========================================
+   LAB WIDGET: stepper around one 3D scene
+   def = { cam, steps:[{k,c,b:()=>boxes, cam?, p?}], compact?, spin?, noCtrl?, labels?, list? }
+   New/changed boxes between steps drop in; removed boxes vanish (etch, strip, CMP).
+   =========================================== */
+class Lab {
+  constructor(root, def) {
+    this.el = root; this.def = def; this.i = -1; this.prev = new Set(); this.hidden = new Set();
+    const viewer = el('div', 'viewer'); this.scene = el('div', 'scene'); viewer.appendChild(this.scene);
+    this.leg = el('div', 'legend');
+    root.replaceChildren(viewer, this.leg, el('div', 'hint', 'DRAG · SCROLL'));
+    if (!def.noCtrl) {
+      const foot = el('div', 'lab-foot'); this.ctrl = el('div', 'ctrl'); this.params = el('div', 'params'); this.cap = el('div', 'cap');
+      foot.append(this.ctrl, this.params, this.cap); root.appendChild(foot); this.buildCtrl();
+    }
+    this.orbit = W3D.orbit(viewer, this.scene, def.cam || {}, def.spin);
+    this.list = def.list ? [...document.querySelectorAll(`[data-for="${root.id}"] li`)] : [];
+    this.list.forEach((li, k) => li.addEventListener('click', () => { this.stop(); this.go(k); }));
+    this.go(0);
+  }
+  buildCtrl() {
+    const steps = this.def.steps;
+    const btn = (t, f, cls = '') => { const b = el('button', cls, t); b.addEventListener('click', e => { e.stopPropagation(); f(); }); this.ctrl.appendChild(b); return b; };
+    if (this.def.compact) {
+      btn('◀ PREV', () => { this.stop(); this.go(Math.max(0, this.i - 1)); });
+      this.counter = btn('', () => {}, 'counter');
+      btn('NEXT ▶', () => { this.stop(); this.go(Math.min(steps.length - 1, this.i + 1)); });
+    } else {
+      this.btns = steps.map((s, k) => btn(s.k, () => { this.stop(); this.go(k); }));
+    }
+    this.playBtn = btn('▶ PLAY', () => this.timer ? this.stop() : this.play(), 'play');
+  }
+  play() { this.playBtn.textContent = '■ STOP'; if (this.i >= this.def.steps.length - 1) this.go(0); this.timer = setInterval(() => { if (this.i >= this.def.steps.length - 1) return this.stop(); this.go(this.i + 1); }, 2600); }
+  stop() { clearInterval(this.timer); this.timer = null; if (this.playBtn) this.playBtn.textContent = '▶ PLAY'; }
+  go(i) {
+    const s = this.def.steps[i]; this.i = i;
+    const boxes = s.b(), key = b => [b.x, b.y, b.z, b.w, b.d, b.h, b.m, b.g, b.cls].join(',');
+    const zs = [...new Set(boxes.filter(b => !this.prev.has(key(b))).map(b => b.z))].sort((a, b) => a - b);
+    this.scene.replaceChildren();
+    boxes.forEach(b => {
+      const g = W3D.cuboid(this.scene, b);
+      if (this.hidden.has(b.m)) g.classList.add('hide');
+      if (!this.prev.has(key(b)) && !(b.cls || '').includes('float')) { g.classList.add('drop'); g.style.setProperty('--i', Math.min(zs.indexOf(b.z), 8)); }
+    });
+    this.prev = new Set(boxes.map(key));
+    this.legend([...new Set(boxes.map(b => b.m))]);
+    if (s.cam) this.orbit.set(s.cam);
+    if (!this.def.noCtrl) {
+      if (this.btns) this.btns.forEach((b, k) => b.classList.toggle('on', k === i));
+      if (this.counter) this.counter.textContent = `STEP ${i + 1} / ${this.def.steps.length}`;
+      this.cap.textContent = s.c || '';
+      this.params.replaceChildren(...Object.entries(s.p || {}).map(([k, v]) => { const sp = el('span'); sp.append(el('em', '', k), document.createTextNode(v)); return sp; }));
+    }
+    this.list.forEach((li, k) => li.classList.toggle('on', k === i));
+  }
+  legend(ms) {
+    const lab = this.def.labels || {};
+    this.leg.replaceChildren(...ms.map(m => {
+      const t = el('button', 'chip' + (this.hidden.has(m) ? ' off' : ''));
+      const sw = el('i'); sw.style.background = MAT[m][0];
+      t.append(sw, document.createTextNode(lab[m] || MAT[m][1])); t.title = 'Show / hide this region';
+      t.addEventListener('click', e => { e.stopPropagation(); this.hidden.has(m) ? this.hidden.delete(m) : this.hidden.add(m); t.classList.toggle('off'); this.scene.querySelectorAll(`.cub[data-m="${m}"]`).forEach(c => c.classList.toggle('hide', this.hidden.has(m))); });
+      return t;
+    }));
+  }
+}
+
+
+/* ===========================================
+   WIDGET DEFINITIONS: one per process slide
+   Each step returns the full list of boxes for that moment.
+   =========================================== */
+const FY = [-150, 150]; // default depth range for cross-section style blocks
+const Xy = (x1, x2, z1, z2, m, o) => X(x1, x2, FY[0], FY[1], z1, z2, m, o);
+
+/* --- Title / closing / TCAD device: planar NMOS --- */
+const nmos3 = (o = {}) => [
+  X(-260, 260, -260, 260, 0, 120, 'si', o.si), X(-260, 260, -52, 52, 120, 130, 'hfo2', o.all), X(-260, 260, -52, 52, 130, 208, 'tin', o.all),
+  X(-260, 260, -80, -52, 120, 208, 'sin', o.all), X(-260, 260, 52, 80, 120, 208, 'sin', o.all),
+  X(-52, 52, -230, -150, 120, 190, 'cu', o.all), X(-52, 52, 150, 230, 120, 190, 'cu', o.all), X(-210, -132, -30, 30, 208, 268, 'cu', o.all)
+];
+
+/* --- Oxidation: Si mesa, oxide top a / sidewall b --- */
+const oxBase = () => [Xy(-240, 240, 0, 120, 'si'), Xy(-60, 60, 120, 200, 'si')];
+const oxFilm = (t, s) => [Xy(-240, -60 - s, 120, 120 + t, 'sio2'), Xy(60 + s, 240, 120, 120 + t, 'sio2'), Xy(-60 - s, -60, 120, 200, 'sio2'), Xy(60, 60 + s, 120, 200, 'sio2'), Xy(-60 - s, 60 + s, 200, 200 + t, 'sio2')];
+
+/* --- Lithography --- */
+const LO = [[-150, -90], [-30, 30], [90, 150]], LC = segs(-240, 240, LO);
+const lBase = () => [Xy(-240, 240, 0, 100, 'si'), Xy(-240, 240, 100, 130, 'sio2')];
+
+/* --- Etch --- */
+const EO = [[-130, -50], [50, 130]], EC = segs(-240, 240, EO);
+const eMask = () => EC.map(([a, b]) => Xy(a, b, 160, 190, 'pr'));
+
+/* --- Deposition coverage: trench x -60..60, depth 140 --- */
+const dBase = () => [Xy(-240, 240, 0, 60, 'si'), Xy(-240, -60, 60, 200, 'si'), Xy(60, 240, 60, 200, 'si')];
+
+/* --- CVD vs ALD --- */
+const aSub = () => [X(-200, 200, -120, 120, 0, 60, 'si')];
+const aGrid = []; for (let x = -160; x <= 160; x += 40) for (let y = -80; y <= 80; y += 40) aGrid.push([x, y]);
+const atoms = (z, m) => aGrid.map(([x, y]) => X(x - 9, x + 9, y - 9, y + 9, z, z + 16, m));
+const purge = () => [-60, 0, 60].map(y => X(-230, 230, y - 3, y + 3, 190, 196, 'purge'));
+const aLayer = (k) => X(-200, 200, -120, 120, 60 + k * 14, 74 + k * 14, k % 2 ? 'ald2' : 'ald');
+
+/* --- Metallization (BEOL) --- */
+const mSub = () => [X(-240, 240, -180, 180, 0, 80, 'si')];
+const mFEOL = () => [...mSub(), ...[-150, -50, 50, 150].map(x => X(x - 12, x + 12, -150, 150, 80, 120, 'tin'))];
+const mM1 = () => [...[-100, 0, 100].flatMap(x => [-100, 100].map(y => X(x - 10, x + 10, y - 10, y + 10, 80, 150, 'cu'))), ...[-100, 0, 100].map(x => X(x - 16, x + 16, -150, 150, 150, 174, 'cu')), X(-240, 240, -180, 180, 80, 174, 'ild')];
+const mM2 = () => [...[-100, 0, 100].flatMap(x => [-60, 60].map(y => X(x - 10, x + 10, y - 10, y + 10, 174, 220, 'cu'))), ...[-60, 60].map(y => X(-200, 200, y - 16, y + 16, 220, 244, 'cu')), X(-240, 240, -180, 180, 174, 244, 'ild')];
+const mM3 = () => [...[-150, 150].flatMap(x => [-60, 60].map(y => X(x - 12, x + 12, y - 12, y + 12, 244, 300, 'cu'))), ...[-150, 150].map(x => X(x - 34, x + 34, -160, 160, 300, 330, 'cu')), X(-240, 240, -180, 180, 244, 330, 'ild')];
+const mTop = () => [X(-240, 240, -180, 180, 330, 348, 'sin'), ...[-150, 150].flatMap(x => [-100, 0, 100].map(y => X(x - 24, x + 24, y - 24, y + 24, 348, 390, 'ball')))];
+const mArray = () => { const P = [-150, -50, 50, 150], o = [...mSub()]; P.forEach(x => P.forEach(y => o.push(X(x - 30, x + 30, y - 30, y + 30, 80, 110, 'cell'), X(x - 6, x + 6, y + 14, y + 26, 110, 140, 'cu')))); P.forEach(y => o.push(X(-220, 220, y - 18, y - 4, 110, 124, 'wl'))); P.forEach(x => o.push(X(x - 9, x + 9, -220, 220, 140, 156, 'bl'))); return o; };
+
+/* --- Package levels --- */
+const pkWafer = () => { const o = [X(-215, 215, -215, 215, -4, 0, 'emc')]; for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) if (i * i + j * j <= 11 && !(i === 0 && j === 0)) o.push(X(i * 58 - 26, i * 58 + 26, j * 58 - 26, j * 58 + 26, 0, 12, 'si')); o.push(X(-26, 26, -26, 26, 90, 102, 'si')); return o; };
+const pkUnit = () => { const o = [X(-110, 110, -110, 110, 0, 16, 'sub'), X(-60, 60, -60, 60, 16, 30, 'si'), X(-100, 100, -100, 100, 16, 70, 'emc', { g: 1 })]; for (let x = -80; x <= 80; x += 32) for (let y = -80; y <= 80; y += 32) o.push(X(x - 9, x + 9, y - 9, y + 9, -18, 0, 'ball')); return o; };
+const pkModule = (cob) => { const o = [X(-260, 260, -80, 80, 0, 12, 'sub')]; for (let i = 0; i < 8; i++) { const x = -225 + i * 64; o.push(cob ? X(x - 20, x + 20, -30, 30, 12, 20, 'si') : X(x - 24, x + 24, -50, 50, 12, 30, 'emc')); } for (let i = 0; i < 21; i++) o.push(X(-252 + i * 24, -242 + i * 24, 62, 80, 12, 13, 'land')); return o; };
+const pkBoard = () => { const o = [X(-260, 260, -220, 220, 0, 10, 'sub'), X(-210, -60, -160, -10, 10, 36, 'emc'), X(-195, -75, -145, -25, 36, 46, 'si')]; [30, 100].forEach(x => { o.push(X(x - 12, x + 12, -200, 200, 10, 36, 'emc'), X(x - 4, x + 4, -190, 190, 36, 150, 'sub')); [-140, -70, 0, 70, 140].forEach(y => o.push(X(x + 4, x + 10, y - 26, y + 26, 60, 130, 'emc'))); }); return o; };
+
+/* --- Package types --- */
+const tDIP = () => { const o = [X(-150, 150, -60, 60, 40, 90, 'emc'), X(-150, -128, -12, 12, 90, 92, 'void')]; for (let i = 0; i < 7; i++) { const x = -120 + i * 40; o.push(X(x - 7, x + 7, -72, -60, 0, 66, 'ball'), X(x - 7, x + 7, 60, 72, 0, 66, 'ball')); } return o; };
+const tQFP = () => { const o = [X(-110, 110, -110, 110, 20, 52, 'emc')]; for (let i = 0; i < 8; i++) { const p = -87.5 + i * 25; o.push(X(p - 5, p + 5, 110, 150, 10, 16, 'ball'), X(p - 5, p + 5, -150, -110, 10, 16, 'ball'), X(110, 150, p - 5, p + 5, 10, 16, 'ball'), X(-150, -110, p - 5, p + 5, 10, 16, 'ball')); } return o; };
+const tTSOP = () => { const o = [X(-170, 170, -90, 90, 12, 36, 'emc')]; for (let i = 0; i < 12; i++) { const x = -154 + i * 28; o.push(X(x - 5, x + 5, 90, 124, 6, 12, 'ball'), X(x - 5, x + 5, -124, -90, 6, 12, 'ball')); } return o; };
+const tGrid = (m, s, z1) => { const o = [X(-150, 150, -150, 150, 0, 16, 'sub'), X(-140, 140, -140, 140, 16, 62, 'emc')]; for (let x = -119; x <= 119; x += 34) for (let y = -119; y <= 119; y += 34) o.push(X(x - s, x + s, y - s, y + s, z1, 0, m)); return o; };
+
+/* --- Wire bond vs flip chip --- */
+const fSub = () => { const o = [X(-200, 200, -150, 150, 0, 20, 'sub')]; for (let x = -150; x <= 150; x += 60) for (let y = -90; y <= 90; y += 60) o.push(X(x - 12, x + 12, y - 12, y + 12, -24, 0, 'ball')); return o; };
+const fWB = () => { const o = [...fSub(), X(-100, 100, -80, 80, 20, 50, 'si')]; [-60, -30, 30, 60].forEach(y => [-1, 1].forEach(s => { const a = s * 94, b = s * 160; o.push(X(Math.min(a, a + s * 4), Math.max(a, a + s * 4), y - 2, y + 2, 50, 88, 'au'), X(Math.min(a, b), Math.max(a, b), y - 2, y + 2, 86, 90, 'au'), X(Math.min(b, b + s * 4), Math.max(b, b + s * 4), y - 2, y + 2, 20, 90, 'au')); })); o.push(X(-200, 200, -150, 150, 20, 112, 'emc', { g: 1 })); o.push(X(0, 96, 28, 32, 50, 53, 'sig'), X(96, 100, 28, 32, 50, 92, 'sig'), X(96, 166, 28, 32, 88, 92, 'sig'), X(162, 166, 28, 32, -24, 92, 'sig')); return o; };
+const fFC = () => { const o = [...fSub(), X(-100, 100, -80, 80, 36, 66, 'si')]; for (let x = -80; x <= 80; x += 40) for (let y = -60; y <= 60; y += 40) o.push(X(x - 8, x + 8, y - 8, y + 8, 20, 36, 'ball')); o.push(X(34, 42, 22, 30, -24, 40, 'sig')); return o; };
+
+/* --- Stacks: wire-bond, TSV, HBM 2.5D --- */
+const sSub = () => [X(-230, 230, -160, 160, 0, 20, 'sub')];
+const sWB = () => { const o = sSub(); for (let k = 0; k < 4; k++) { const x1 = -170 + k * 32, zt = 40 + k * 28, y = -66 + k * 44; o.push(X(x1, 150, -100, 100, 20 + k * 28, zt, 'dram'), X(x1 + 4, x1 + 8, y - 2, y + 2, zt, zt + 14, 'au'), X(-206 + k * 6, x1 + 8, y - 2, y + 2, zt + 12, zt + 16, 'au'), X(-206 + k * 6, -202 + k * 6, y - 2, y + 2, 20, zt + 16, 'au')); } return o; };
+const sTSV = () => { const o = sSub(); for (let k = 0; k < 4; k++) o.push(X(-130, 130, -90, 90, 20 + k * 32, 42 + k * 32, 'dram')); [-80, -30, 30, 80].forEach(x => [-40, 40].forEach(y => { o.push(X(x - 5, x + 5, y - 5, y + 5, 20, 138, 'cu')); for (let k = 0; k < 3; k++) o.push(X(x - 8, x + 8, y - 8, y + 8, 42 + k * 32, 52 + k * 32, 'ball')); })); return o; };
+const sHBM = (ex) => {
+  const o = [X(-250, 250, -170, 170, 0, 24, 'sub'), X(-215, 215, -130, 130, 34, 54, 'inter'), X(-40, 25, -50, 50, 54, 56, 'sig')];
+  for (let x = -180; x <= 180; x += 60) [-100, 0, 100].forEach(y => o.push(X(x - 6, x + 6, y - 6, y + 6, 24, 34, 'ball')));
+  const lift = ex ? 70 : 0, gap = ex ? 40 : 8, h = 18;
+  o.push(X(-195, -45, -90, 90, 64 + lift, 94 + lift, 'logic'));
+  [-150, -90].forEach(x => [-50, 50].forEach(y => o.push(X(x - 6, x + 6, y - 6, y + 6, 54 + lift, 64 + lift, 'ball'))));
+  let z = 64 + lift;
+  for (let k = 0; k < 5; k++) {
+    const m = k === 0 ? 'logic' : 'dram';
+    o.push(X(25, 185, -80, 80, z, z + h, m));
+    [60, 105, 150].forEach(x => [-40, 40].forEach(y => { o.push(X(x - 4, x + 4, y - 4, y + 4, z, z + h + 0.5, 'cu')); o.push(X(x - 7, x + 7, y - 7, y + 7, z - 8, z, 'ball')); }));
+    z += h + gap;
+  }
+  return o;
+};
+
+/* --- Monolithic vs chiplet vs SiP --- */
+const cTiles = (x1, x2, y1, y2, z) => [X(x1 + 8, (x1 + x2) / 2 - 6, y1 + 8, (y1 + y2) / 2 - 6, z, z + 4, 'cpu'), X((x1 + x2) / 2 + 6, x2 - 8, y1 + 8, (y1 + y2) / 2 - 6, z, z + 4, 'gpu'), X(x1 + 8, (x1 + x2) / 2 - 6, (y1 + y2) / 2 + 6, y2 - 8, z, z + 4, 'modem'), X((x1 + x2) / 2 + 6, x2 - 8, (y1 + y2) / 2 + 6, y2 - 8, z, z + 4, 'sram')];
+const cSub = () => [X(-230, 230, -170, 170, 0, 20, 'sub')];
+const cMono = () => [...cSub(), X(-170, 170, -130, 130, 20, 46, 'si'), ...cTiles(-170, 170, -130, 130, 46)];
+const cChiplet = () => [...cSub(), X(-212, 212, -162, 162, 20, 36, 'inter'),
+  X(-195, -25, -145, -15, 36, 70, 'si'), X(-185, -35, -135, -25, 70, 74, 'cpu'), X(25, 195, -145, -15, 36, 60, 'si'), X(35, 185, -135, -25, 60, 64, 'gpu'),
+  X(-195, -25, 15, 145, 36, 54, 'si'), X(-185, -35, 25, 135, 54, 58, 'modem'), X(25, 195, 15, 145, 36, 66, 'si'), X(35, 185, 25, 135, 66, 70, 'sram'),
+  X(-25, 25, -90, -70, 36, 38, 'sig'), X(-25, 25, 70, 90, 36, 38, 'sig'), X(-120, -100, -15, 15, 36, 38, 'sig'), X(100, 120, -15, 15, 36, 38, 'sig')];
+const cSiP = () => { const o = cSub(); ['logic', 'dram', 'dram'].forEach((m, k) => o.push(X(-120, 120, -100, 100, 20 + k * 40, 52 + k * 40, m))); [-70, 0, 70].forEach(x => [-50, 50].forEach(y => o.push(X(x - 5, x + 5, y - 5, y + 5, 20, 133, 'cu')))); o.push(X(-5, 5, -100, 100, 20, 133, 'sig', { g: 0 })); return o; };
+
+/* --- OpenTCAD lab: 100 x 100 nm wafer, 4 px per nm --- */
+const L = (x1, x2, y1, y2, z1, z2, m, o) => X((x1 - 50) * 4, (x2 - 50) * 4, (y1 - 50) * 4, (y2 - 50) * 4, z1 * 4, z2 * 4, m, o);
+const LR = (r, z1, z2, m, o) => L(r[0], r[1], r[2], r[3], z1, z2, m, o);
+const FULL = [0, 100, 0, 100], SQ = [25, 75, 25, 75];
+const lMask = () => [L(0, 100, 0, 100, 55, 55.5, 'glass'), L(25, 75, 25, 75, 55.5, 56.5, 'protect')];
+
+/* --- Planar NMOS manual: x/y 4 px per nm, z 3 px per nm --- */
+const N = (x1, x2, y1, y2, z1, z2, m, o) => X((x1 - 50) * 4, (x2 - 50) * 4, (y1 - 50) * 4, (y2 - 50) * 4, z1 * 3, z2 * 3, m, o);
+const NR = (r, z1, z2, m) => N(r[0], r[1], r[2], r[3], z1, z2, m);
+const nWafer = () => [N(0, 100, 0, 100, 0, 50, 'si')];
+const nGate = () => [N(0, 100, 40, 60, 50, 53, 'hfo2'), N(0, 100, 40, 60, 53, 78, 'tin')];
+const nWalls = (top = 88) => [N(0, 100, 30, 40, 50, top, 'sin'), N(0, 100, 60, 70, 50, top, 'sin')];
+const SRC = [40, 60, 10, 25], DRN = [40, 60, 75, 90], GC = [10, 25, 45, 55];
+const nVias = () => [...nWafer(), N(0, 100, 40, 60, 50, 53, 'hfo2'), N(0, 100, 40, 60, 53, 58, 'tin'), ...rsub([0, 100, 40, 60], [GC]).map(r => NR(r, 58, 78, 'tin')), ...nWalls(78),
+  N(0, 100, 0, 30, 50, 58, 'ild'), N(0, 100, 70, 100, 50, 58, 'ild'), ...rsub([0, 100, 0, 30], [SRC]).map(r => NR(r, 58, 78, 'ild')), ...rsub([0, 100, 70, 100], [DRN]).map(r => NR(r, 58, 78, 'ild'))];
+const nMetal = () => [...nVias(), NR(SRC, 58, 88, 'cu'), NR(GC, 58, 88, 'cu'), NR(DRN, 58, 88, 'cu')];
+const NMOS_LABELS = { si: 'Substrate · Si', hfo2: 'Gate_Oxide · HfO₂', tin: 'Gate_Metal · TiN', sin: 'Spacer_Nitride · Si₃N₄', ild: 'ILD_Oxide · SiO₂', cu: 'Metal_Electrodes · Cu', glass: 'Mask plate', protect: 'Protected area' };
+
+const WIDGETS = {
+  title: { cam: { rz: -38, rx: 58, zoom: .95 }, noCtrl: true, spin: true, steps: [{ b: () => nmos3() }] },
+  closing: { cam: { rz: 20, rx: 60, zoom: .85 }, noCtrl: true, spin: true, steps: [{ b: () => nmos3() }] },
+
+  oxi: { cam: { rz: -28, rx: 64, zoom: .95 }, steps: [
+    { k: 'BARE Si', c: 'A silicon mesa before oxidation. Every exposed Si surface (top a and sidewall b) can grow SiO₂.', b: () => oxBase() },
+    { k: 'DRY O₂', c: 'Dry: O₂ (often diluted with N₂) at atmospheric pressure. Moderate rate and a denser film; the sidewall b grows thinner than the top a.', b: () => [...oxBase(), ...oxFilm(22, 12), ...parts('o2', 10, 3)] },
+    { k: 'WET H₂O', c: 'Wet: H₂O vapour at atmospheric pressure. The fastest oxide growth rate gives the thickest film for the same time.', b: () => [...oxBase(), ...oxFilm(44, 26), ...parts('h2o', 18, 5)] },
+    { k: 'RADICAL', c: 'Radical: H₂ + O₂ under low pressure (< 1 Torr). Slow, but conformal and orientation-independent, so a = b and corners round off.', b: () => [...oxBase(), ...oxFilm(18, 18), ...parts('rad', 14, 7)] }
+  ] },
+
+  litho: { cam: { rz: -24, rx: 62, zoom: .85 }, steps: [
+    { k: 'WAFER', c: 'Si wafer with an SiO₂ layer to be patterned.', b: () => lBase() },
+    { k: 'COAT PR', c: 'Photoresist (PR) is spin-coated over the wafer. Light will change its solubility in the developer.', b: () => [...lBase(), Xy(-240, 240, 130, 170, 'pr')] },
+    { k: 'EXPOSE', c: '193 nm light passes through the clear parts of the photomask (chrome blocks the rest), like a cookie cutter printing the same shape every time.', b: () => [...lBase(), ...LC.map(([a, b]) => Xy(a, b, 130, 170, 'pr')), ...LO.map(([a, b]) => Xy(a, b, 130, 170, 'prx')), Xy(-240, 240, 380, 386, 'glass'), ...LC.map(([a, b]) => Xy(a, b, 386, 396, 'chrome')), ...LO.map(([a, b]) => Xy(a, b, 170, 380, 'light'))] },
+    { k: 'DEVELOP +', c: 'Positive PR: exposed areas dissolve in the developer, which suits fine patterns.', b: () => [...lBase(), ...LC.map(([a, b]) => Xy(a, b, 130, 170, 'pr'))] },
+    { k: 'DEVELOP −', c: 'Negative PR: exposed areas harden and remain, but the resist swells, so it is less suited to fine patterns.', b: () => [...lBase(), ...LO.map(([a, b]) => Xy(a, b, 130, 170, 'pr'))] },
+    { k: 'ETCH + STRIP', c: 'The PR acts as a mold: the oxide is etched where it is open, then the resist is stripped. The mask pattern now lives in the SiO₂.', b: () => [Xy(-240, 240, 0, 100, 'si'), ...LC.map(([a, b]) => Xy(a, b, 100, 130, 'sio2'))] }
+  ] },
+
+  etch: { cam: { rz: -22, rx: 60, zoom: .9 }, steps: [
+    { k: 'MASKED', c: 'A PR mask protects the Si. Only the open areas will react with the etchant.', b: () => [Xy(-240, 240, 0, 160, 'si'), ...eMask()] },
+    { k: 'ANISOTROPIC', c: 'Anisotropic: etches vertically only, so the trench keeps the pattern exactly as drawn. Lower selectivity and speed.', b: () => [Xy(-240, 240, 0, 70, 'si'), ...EC.map(([a, b]) => Xy(a, b, 70, 160, 'si')), ...eMask()] },
+    { k: 'ISOTROPIC', c: 'Isotropic: etches in all directions and undercuts below the PR. High selectivity and speed, but poor precision.', b: () => { const ext = [40, 36, 30, 20, 8], o = [Xy(-240, 240, 0, 70, 'si'), ...eMask()]; ext.forEach((e, k) => segs(-240, 240, EO.map(([a, b]) => [a - e, b + e])).forEach(([a, b]) => o.push(Xy(a, b, 142 - k * 18, 160 - k * 18, 'si')))); return o; } },
+    { k: 'FILL & CLEAR', c: 'Filling: like chocolate syrup poured into the hollow, material fills the etched trench and the excess is cleared before the next layer.', b: () => [Xy(-240, 240, 0, 70, 'si'), ...EC.map(([a, b]) => Xy(a, b, 70, 160, 'si')), ...EO.map(([a, b]) => Xy(a, b, 70, 160, 'cu'))] }
+  ] },
+
+  depo: { cam: { rz: -20, rx: 58, zoom: .9 }, steps: [
+    { k: 'TRENCH', c: 'An etched trench: the film must coat the top (a), the sidewall (b) and the bottom (c).', b: () => dBase() },
+    { k: 'POOR', c: 'Poor step coverage: b/a ≈ 0.33 and c/a ≈ 0.4. The sidewall and bottom are thinner, and the top corners overhang.', b: () => [...dBase(), Xy(-240, -60, 200, 230, 'film'), Xy(60, 240, 200, 230, 'film'), Xy(-60, -45, 200, 230, 'film'), Xy(45, 60, 200, 230, 'film'), Xy(-60, -50, 60, 200, 'film'), Xy(50, 60, 60, 200, 'film'), Xy(-50, 50, 60, 72, 'film')] },
+    { k: 'CONFORMAL', c: 'Good step coverage: b/a ≈ c/a ≈ 1. The closer to 1, the more uniform the film.', b: () => [...dBase(), Xy(-240, -38, 200, 222, 'film'), Xy(38, 240, 200, 222, 'film'), Xy(-60, -38, 60, 200, 'film'), Xy(38, 60, 60, 200, 'film'), Xy(-38, 38, 60, 82, 'film')] },
+    { k: 'GAP FILL: VOID', c: 'Poor gap fill: the opening pinches off before the trench is full, trapping a void inside.', b: () => [...dBase(), Xy(-60, 60, 60, 100, 'film'), Xy(-60, -8, 100, 200, 'film'), Xy(8, 60, 100, 200, 'film'), Xy(-240, 240, 200, 236, 'film'), Xy(-8, 8, 100, 192, 'void')] },
+    { k: 'GAP FILL: GOOD', c: 'Excellent gap fill: the trench fills from the bottom up, leaving almost no voids.', b: () => [...dBase(), Xy(-60, 60, 60, 200, 'film'), Xy(-240, 240, 200, 230, 'film')] }
+  ] },
+
+  ald: { cam: { rz: -30, rx: 60, zoom: .95 }, steps: [
+    { k: 'CVD', c: 'Conventional CVD: source and reactant gases arrive together, so the film grows continuously and fast through adsorption, surface diffusion and reaction.', b: () => [...aSub(), X(-200, 200, -120, 120, 60, 100, 'film'), ...parts('gasA', 12, 11, [150, 320], 190, 110, 16), ...parts('gasB', 12, 12, [150, 320], 190, 110, 16)] },
+    { k: '1 · SOURCE', c: 'ALD step 1, source pulse: precursor molecules adsorb on every surface site, and adsorption stops once the sites are full.', b: () => [...aSub(), ...atoms(60, 'gasA'), ...parts('gasA', 14, 21, [150, 320], 190, 110, 16)] },
+    { k: '2 · PURGE', c: 'ALD step 2, purge: inert gas sweeps out the unreacted precursor. Only the single adsorbed layer remains.', b: () => [...aSub(), ...atoms(60, 'gasA'), ...purge()] },
+    { k: '3 · REACTANT', c: 'ALD step 3, reactant pulse: the reactant reacts with the adsorbed precursor layer.', b: () => [...aSub(), ...atoms(60, 'gasA'), ...atoms(76, 'gasB'), ...parts('gasB', 14, 31, [150, 320], 190, 110, 16)] },
+    { k: '4 · PURGE', c: 'ALD step 4, purge: the by-products are removed. One cycle has deposited exactly one atomic layer.', b: () => [...aSub(), aLayer(0), ...purge()] },
+    { k: 'ALD × 3', c: 'Repeat the cycle N times to get N layers, so thickness is controlled at the atomic level.', b: () => [...aSub(), aLayer(0), aLayer(1), aLayer(2)] }
+  ] },
+
+  metal: { cam: { rz: -32, rx: 60, zoom: .82 }, steps: [
+    { k: 'FEOL', c: 'Front-end of line: devices (gate lines shown) are formed first at the bottom of the chip.', b: () => mFEOL() },
+    { k: '+ M1', c: 'BEOL begins: contacts land on the devices and the first Cu metal layer (M1) is embedded in ILD.', b: () => [...mFEOL(), ...mM1()] },
+    { k: '+ VIA · M2', c: 'Vias connect up to M2, which runs at right angles to M1. Layer by layer, isolated devices become circuits.', b: () => [...mFEOL(), ...mM1(), ...mM2()] },
+    { k: '+ VIA · M3', cam: { rz: -32, rx: 60, zoom: .66 }, c: 'Upper layers are thicker and wider, carrying power and long-distance signals.', b: () => [...mFEOL(), ...mM1(), ...mM2(), ...mM3()] },
+    { k: 'BUMPS', cam: { rz: -32, rx: 62, zoom: .56 }, c: 'The top layer ends in input/output terminals: passivation plus solder bumps for packaging.', b: () => [...mFEOL(), ...mM1(), ...mM2(), ...mM3(), ...mTop()] },
+    { k: 'MEMORY ARRAY', c: 'In a memory cell array, word lines and bit lines are the metal wiring that links each cell to its control signals.', cam: { rz: -30, rx: 62, zoom: .95 }, b: () => mArray() }
+  ] },
+
+  pkg: { cam: { rz: -30, rx: 58, zoom: .9 }, steps: [
+    { k: 'LEVEL 0', c: 'Level 0: chips are cut from the wafer.', b: () => pkWafer() },
+    { k: 'LEVEL 1', c: 'Level 1: a single chip is packaged into one unit. Here it is an FBGA, with the die sealed in EMC and solder balls underneath.', cam: { rz: -30, rx: 40, zoom: 1.4 }, b: () => pkUnit() },
+    { k: 'LEVEL 2', c: 'Level 2: packaged units are mounted on a module or card.', cam: { rz: -30, rx: 58, zoom: .95 }, b: () => pkModule(false) },
+    { k: 'LEVEL 3', c: 'Level 3: the card is installed on the motherboard.', cam: { rz: -36, rx: 56, zoom: .85 }, b: () => pkBoard() },
+    { k: 'COB', c: 'Chip-On-Board: bare chips are mounted directly on the module or card, skipping the 1st level.', cam: { rz: -30, rx: 58, zoom: .95 }, b: () => pkModule(true) }
+  ] },
+
+  ptype: { cam: { rz: -30, rx: 55, zoom: 1.15 }, steps: [
+    { k: 'DIP', c: 'Through-hole DIP: two rows of pins are inserted into PCB holes. ZIP uses a single zig-zag row.', cam: { rz: -30, rx: 40, zoom: 1.15 }, b: () => tDIP() },
+    { k: 'QFP', c: 'Surface mount QFP/TQFP: leads on four sides attach to the PCB surface, allowing more pins.', cam: { rz: -30, rx: 55, zoom: 1.15 }, b: () => tQFP() },
+    { k: 'TSOP', c: 'Surface mount TSOP: gull-wing leads on two sides of a thin body. SOJ uses J-shaped leads.', cam: { rz: -30, rx: 55, zoom: 1.15 }, b: () => tTSOP() },
+    { k: 'BGA (UNDER)', c: 'BGA/FBGA: solder balls are attached to the package substrate. This is the most common substrate-type package.', cam: { rz: -30, rx: -42, zoom: 1.15 }, b: () => tGrid('ball', 11, -22) },
+    { k: 'LGA (UNDER)', c: 'LGA: the substrate has only flat lands with no solder balls, and it is becoming more common.', cam: { rz: -30, rx: -42, zoom: 1.15 }, b: () => tGrid('land', 12, -3) }
+  ] },
+
+  flip: { cam: { rz: -26, rx: 30, zoom: 1.2 }, steps: [
+    { k: 'STANDARD FBGA', c: 'Wire bond: die pad → Au wire → substrate finger → via → ball. The signal takes a longer path.', b: () => fWB() },
+    { k: 'FLIP CHIP', c: 'Flip chip: bumps on the chip pads; the die is flipped onto the substrate. A short, direct path, so a thinner package and better electrical performance.', b: () => fFC() }
+  ] },
+
+  stack: { cam: { rz: -32, rx: 30, zoom: 1.05 }, steps: [
+    { k: 'WIRE-BOND STACK', c: 'Stacked chips connected by wires. Capacity grows with the number of chips.', b: () => sWB() },
+    { k: 'TSV STACK', c: 'Through-silicon vias (vertical electrodes) replace the wires, giving better performance and a smaller package.', b: () => sTSV() },
+    { k: 'HBM · 2.5D', c: 'HBM: DRAM dies stacked with TSVs and micro-bumps, placed beside the logic die on an interposer that links their PHY areas.', cam: { rz: -32, rx: 34, zoom: .92 }, b: () => sHBM(false) },
+    { k: 'EXPLODE', c: 'Exploded HBM: every die carries TSVs, and micro-bumps join die to die without wires. The interposer sits on package bumps and BGA balls.', cam: { rz: -32, rx: 26, zoom: .8 }, b: () => sHBM(true) }
+  ] },
+
+  chiplet: { cam: { rz: -30, rx: 56, zoom: .95 }, steps: [
+    { k: 'MONOLITHIC SoC', c: 'Monolithic SoC: one large chip integrates CPU, GPU, modem and SRAM in a plane, so signals travel long horizontal paths.', b: () => cMono() },
+    { k: 'CHIPLET', c: 'Chiplet: each block is its own die on its best-fit process node (note the different heights), joined by advanced packaging.', b: () => cChiplet() },
+    { k: 'SiP · TSV', c: 'SiP stacked with TSV: chips are stacked vertically in one package, so the signal path is much shorter.', cam: { rz: -30, rx: 36, zoom: 1.05 }, b: () => cSiP() }
+  ] },
+
+  tcad: { cam: { rz: -34, rx: 58, zoom: .78 }, steps: [
+    { k: 'PROCESS', c: 'Process TCAD simulates foundry steps (implant, diffusion, oxidation, deposition, etch, stress) to predict the physical structure.', b: () => nmos3() },
+    { k: 'DEVICE', c: 'Device TCAD solves the Poisson, continuity and drift-diffusion equations on a discretised mesh, modelling current flow and heat.', b: () => [...nmos3({ si: { cls: 'mesh', g: 1 }, all: { cls: 'mesh' } }), X(-40, 40, -150, 150, 112, 118, 'cur')] },
+    { k: 'INTERCONNECT', c: 'Interconnect TCAD models the non-active wiring to extract parasitics: signal interference and RC effects.', b: () => [...nmos3(), X(-260, 52, -205, -175, 190, 206, 'cu'), X(-52, 260, 175, 205, 190, 206, 'cu'), X(-260, -132, -15, 15, 268, 284, 'cu'), X(-260, 52, -193, -187, 206, 208, 'sig'), X(-52, 260, 187, 193, 206, 208, 'sig')] }
+  ] },
+
+  lab1: { cam: { rz: -32, rx: 58, zoom: 1.05 }, compact: true, list: true, steps: [
+    { c: 'A blank 100 × 100 nm Si wafer is created. Only 5 step types exist, and Process and Mask are needed.', p: { TYPE: 'Create Wafer', MATERIAL: 'Si', SIZE: '100 × 100 nm' }, b: () => [LR(FULL, 0, 30, 'si')] },
+    { c: 'TEST_MASK: the rectangle (25,25)–(75,75) is a protected area that blocks the action, like a shadow mask.', p: { TYPE: 'Mask', NAME: 'TEST_MASK', RECT: '(25,25)–(75,75)' }, b: () => [LR(FULL, 0, 30, 'si'), ...lMask()] },
+    { c: '5 nm of HfO₂ covers the whole Si substrate (Model = all, no mask). Try Anisotropic and Isotropic and compare.', p: { TYPE: 'Deposition', REGION: 'TEST_DEP', MATERIAL: 'HfO₂', THICK: '5 nm', MASK: 'None' }, b: () => [LR(FULL, 0, 30, 'si'), LR(FULL, 30, 35, 'hfo2')] },
+    { c: 'REVERT to step 0, then deposit with TEST_MASK. Deposition happens only where there is no mask.', p: { TYPE: 'Deposition', MATERIAL: 'HfO₂', MASK: 'TEST_MASK', INVERT: '☐' }, b: () => [LR(FULL, 0, 30, 'si'), ...rsub(FULL, [SQ]).map(r => LR(r, 30, 35, 'hfo2')), ...lMask()] },
+    { c: 'Invert Mask checked: now only the rectangle receives the film. Inverting controls the deposition area.', p: { TYPE: 'Deposition', MATERIAL: 'HfO₂', MASK: 'TEST_MASK', INVERT: '☑' }, b: () => [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 35, 'hfo2'), ...lMask()] },
+    { c: 'Anisotropic Co: deposition is vertical only (top surfaces), typical of magnetron sputtering.', p: { TYPE: 'Deposition', REGION: 'Aniso_Iso', MATERIAL: 'Co', THICK: '1 nm', DIR: 'Anisotropic' }, b: () => [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 35, 'hfo2'), LR(SQ, 35, 36.5, 'co'), ...rsub(FULL, [SQ]).map(r => LR(r, 30, 31.5, 'co'))] },
+    { c: 'Isotropic Co: the film also wraps the HfO₂ sidewalls, consistent with CVD or ALD results.', p: { TYPE: 'Deposition', REGION: 'Aniso_Iso', MATERIAL: 'Co', THICK: '1 nm', DIR: 'Isotropic' }, b: () => { const W = [23.5, 76.5, 23.5, 76.5]; return [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 35, 'hfo2'), ...rsub(FULL, [W]).map(r => LR(r, 30, 31.5, 'co')), ...rsub(W, [SQ]).map(r => LR(r, 30, 36.5, 'co')), LR(W, 35, 36.5, 'co')]; } }
+  ] },
+
+  lab2: { cam: { rz: -32, rx: 58, zoom: 1.05 }, compact: true, list: true, steps: [
+    { c: 'Back to the initial substrate. Etching 15 nm with no mask removes Si everywhere (faint volume = removed).', p: { TYPE: 'Etch', THICK: '15 nm', MASK: 'None' }, b: () => [LR(FULL, 0, 15, 'si'), LR(FULL, 15, 30, 'removed')] },
+    { c: 'Etch with TEST_MASK, Anisotropic: masked areas are not etched, while unmasked areas are etched.', p: { TYPE: 'Etch', THICK: '15 nm', MASK: 'TEST_MASK', DIR: 'Anisotropic', INVERT: '☐' }, b: () => [LR(FULL, 0, 15, 'si'), LR(SQ, 15, 30, 'si'), ...rsub(FULL, [SQ]).map(r => LR(r, 15, 30, 'removed'))] },
+    { c: 'Invert Mask: only the masked area is etched, leaving the unmasked area unetched.', p: { TYPE: 'Etch', THICK: '15 nm', MASK: 'TEST_MASK', INVERT: '☑' }, b: () => [LR(FULL, 0, 15, 'si'), ...rsub(FULL, [SQ]).map(r => LR(r, 15, 30, 'si')), LR(SQ, 15, 30, 'removed')] },
+    { c: 'Isotropic etch: the profile rounds and undercuts and the simulation takes longer. Compare the time and result with Anisotropic.', p: { TYPE: 'Etch', THICK: '15 nm', MASK: 'TEST_MASK', DIR: 'Isotropic' }, b: () => [LR(FULL, 0, 15, 'si'), LR(SQ, 15, 20, 'si'), LR([26.5, 73.5, 26.5, 73.5], 20, 25, 'si'), LR([28, 72, 28, 72], 25, 30, 'si')] },
+    { c: 'Simple architecture for CMP: a 20 nm Cu block is deposited inside TEST_MASK (Invert checked).', p: { TYPE: 'Deposition', REGION: 'Cu_Block', MATERIAL: 'Cu', THICK: '20 nm', MASK: 'TEST_MASK ☑' }, b: () => [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 50, 'cu')] },
+    { c: 'Si₃N₄ passivation is deposited isotropically and buries the Cu block (shown translucent).', p: { TYPE: 'Deposition', REGION: 'Passivation', MATERIAL: 'Si₃N₄', THICK: '50 nm' }, b: () => [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 50, 'cu'), ...rsub(FULL, [SQ]).map(r => LR(r, 30, 80, 'sin', { g: 1 })), LR(SQ, 50, 80, 'sin', { g: 1 })] },
+    { c: 'CMP polishes the passivation and stops when it meets a new material interface (Cu), leaving a planar surface.', p: { TYPE: 'CMP', STOP: 'Cu interface', RESULT: 'Planar' }, b: () => [LR(FULL, 0, 30, 'si'), LR(SQ, 30, 50, 'cu'), ...rsub(FULL, [SQ]).map(r => LR(r, 30, 50, 'sin'))] }
+  ] },
+
+  nmos: { cam: { rz: -34, rx: 56, zoom: .82 }, compact: true, list: true, labels: NMOS_LABELS, steps: [
+    { c: 'Blank wafer: Substrate, Si (p-type bulk), 100 × 100 × 50 nm.', p: { TYPE: 'Create Wafer', REGION: 'Substrate', MATERIAL: 'Si', SIZE: '100×100×50 nm' }, b: () => nWafer() },
+    { c: 'Three masks. Rectangles are protected areas: MASK_GATE y40–60, MASK_SPACER y30–70, MASK_CONTACT has 3 rects (S / G / D).', p: { TYPE: 'Mask', GATE: 'y 40–60', SPACER: 'y 30–70', CONTACT: '3 rects' }, cam: { rz: -34, rx: 56, zoom: .68 },
+      b: () => [...nWafer(), N(0, 100, 0, 100, 110, 110.5, 'glass'), N(0, 100, 40, 60, 110.5, 112, 'protect'), N(0, 100, 0, 100, 135, 135.5, 'glass'), N(0, 100, 30, 70, 135.5, 137, 'protect'), N(0, 100, 0, 100, 160, 160.5, 'glass'), NR(SRC, 160.5, 162, 'protect'), NR(GC, 160.5, 162, 'protect'), NR(DRN, 160.5, 162, 'protect')] },
+    { c: 'Gate dielectric: a thin 3 nm HfO₂ film over the whole substrate.', p: { TYPE: 'Deposition', REGION: 'Gate_Oxide', MATERIAL: 'HfO₂', THICK: '3 nm', DIR: 'Aniso' }, cam: { rz: -34, rx: 56, zoom: .82 }, b: () => [...nWafer(), N(0, 100, 0, 100, 50, 53, 'hfo2')] },
+    { c: 'Metal gate: 25 nm of TiN (NMOS work-function metal) covers the dielectric uniformly.', p: { TYPE: 'Deposition', REGION: 'Gate_Metal', MATERIAL: 'TiN', THICK: '25 nm' }, b: () => [...nWafer(), N(0, 100, 0, 100, 50, 53, 'hfo2'), N(0, 100, 0, 100, 53, 78, 'tin')] },
+    { c: 'Gate patterning: etching 28 nm (25 + 3) with MASK_GATE leaves an isolated gate line across the centre.', p: { TYPE: 'Etch', THICK: '28 nm', MASK: 'MASK_GATE', INVERT: '☐' }, b: () => [...nWafer(), ...nGate()] },
+    { c: 'Spacer dielectric: 10 nm of Si₃N₄ wraps the substrate surface and the entire gate electrode.', p: { TYPE: 'Deposition', REGION: 'Spacer_Nitride', MATERIAL: 'Si₃N₄', THICK: '10 nm' }, b: () => [...nWafer(), ...nGate(), N(0, 100, 0, 30, 50, 60, 'sin'), N(0, 100, 70, 100, 50, 60, 'sin'), ...nWalls(), N(0, 100, 40, 60, 78, 88, 'sin')] },
+    { c: 'Spacer etch, 10 nm with MASK_SPACER (Invert ☑): spacers stay on both gate sidewalls and the S/D silicon is exposed.', p: { TYPE: 'Etch', THICK: '10 nm', MASK: 'MASK_SPACER', INVERT: '☑' }, b: () => [...nWafer(), ...nGate(), ...nWalls(), N(0, 100, 40, 60, 78, 88, 'sin')] },
+    { c: 'ILD: 50 nm of SiO₂ fully buries the structure (shown translucent).', p: { TYPE: 'Deposition', REGION: 'ILD_Oxide', MATERIAL: 'SiO₂', THICK: '50 nm' }, b: () => [...nWafer(), ...nGate(), ...nWalls(), N(0, 100, 40, 60, 78, 88, 'sin'), N(0, 100, 0, 30, 50, 100, 'ild'), N(0, 100, 70, 100, 50, 100, 'ild'), N(0, 100, 30, 70, 88, 100, 'ild')] },
+    { c: 'CMP (Model = Gate_Metal, overpolish 0): the surface is planarised and the top of the gate metal is exposed at the centre.', p: { TYPE: 'CMP', MODEL: 'Gate_Metal', OVERPOLISH: '0.0 nm' }, b: () => [...nWafer(), ...nGate(), ...nWalls(78), N(0, 100, 0, 30, 50, 78, 'ild'), N(0, 100, 70, 100, 50, 78, 'ild')] },
+    { c: 'Contact etch, 20 nm with MASK_CONTACT (Invert ☑): vias open vertically above the source, gate and drain.', p: { TYPE: 'Etch', THICK: '20 nm', MASK: 'MASK_CONTACT', INVERT: '☑' }, b: () => nVias() },
+    { c: 'Contact metal: 30 nm of Cu (or Co) fills the vias, giving three independent terminal electrodes (pins).', p: { TYPE: 'Deposition', REGION: 'Metal_Electrodes', MATERIAL: 'Cu', THICK: '30 nm', MASK: 'CONTACT ☑' }, b: () => nMetal() },
+    { c: 'Final check: regions are pulled apart. Click the region chips to toggle Substrate, Gate_Oxide, Gate_Metal, Spacer, ILD and Electrodes.', p: { TYPE: 'Verify', VIEW: 'Exploded', TIP: 'Toggle regions' }, cam: { rz: -34, rx: 46, zoom: .5 },
+      b: () => { const off = { si: 0, hfo2: 10, tin: 20, sin: 20, ild: 36, cu: 58 }; return nMetal().map(b => ({ ...b, z: b.z + off[b.m] * 3 })); } }
+  ] }
+};
+
+
+/* ===========================================
+   SLIDE PRESENTATION CONTROLLER
+   Arrows / Space / PageUp-Down / Home-End, wheel, swipe, progress, lazy 3D init
+   =========================================== */
+class SlidePresentation {
+  constructor() {
+    this.slides = [...document.querySelectorAll('.slide')];
+    this.stage = document.getElementById('deckStage');
+    this.current = 0; this.labs = new Map();
+    this.setupStageScale(); this.setupKeyboardNav(); this.setupWheelNav(); this.setupTouchNav();
+    document.querySelectorAll('[data-goto]').forEach(t => t.addEventListener('click', () => this.show(+t.dataset.goto)));
+    const fromHash = () => { const n = parseInt(location.hash.slice(1), 10); return Number.isFinite(n) ? n : 0; };
+    addEventListener('hashchange', () => this.show(fromHash()));
+    this.show(fromHash());
+  }
+  setupStageScale() {
+    const scale = () => { const f = Math.min(innerWidth / 1920, innerHeight / 1080); this.stage.style.transform = `translate(${(innerWidth - 1920 * f) / 2}px, ${(innerHeight - 1080 * f) / 2}px) scale(${f})`; };
+    scale(); addEventListener('resize', scale);
+  }
+  setupKeyboardNav() {
+    document.addEventListener('keydown', e => {
+      const t = e.target;
+      if (t.isContentEditable || ((e.key === ' ' || e.key === 'Enter') && t.closest && t.closest('button, li, .tile'))) return;
+      const k = e.key;
+      if (['ArrowRight', 'ArrowDown', 'PageDown', ' '].includes(k)) { e.preventDefault(); this.show(this.current + 1); }
+      else if (['ArrowLeft', 'ArrowUp', 'PageUp'].includes(k)) { e.preventDefault(); this.show(this.current - 1); }
+      else if (k === 'Home') this.show(0);
+      else if (k === 'End') this.show(this.slides.length - 1);
+    });
+  }
+  setupWheelNav() {
+    let lock = false;
+    addEventListener('wheel', e => { if (lock || Math.abs(e.deltaY) < 30) return; lock = true; this.show(this.current + (e.deltaY > 0 ? 1 : -1)); setTimeout(() => lock = false, 700); }, { passive: true });
+  }
+  setupTouchNav() {
+    let x0 = null;
+    addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+    addEventListener('touchend', e => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) this.show(this.current + (dx < 0 ? 1 : -1)); x0 = null; }, { passive: true });
+  }
+  show(i) {
+    this.current = Math.max(0, Math.min(i, this.slides.length - 1));
+    this.slides.forEach((s, k) => { s.classList.toggle('active', k === this.current); s.classList.toggle('visible', k === this.current); });
+    const s = this.slides[this.current];
+    s.querySelectorAll('.lab[data-w]').forEach(el => { if (!this.labs.has(el)) this.labs.set(el, new Lab(el, WIDGETS[el.dataset.w])); });
+    document.getElementById('progress').style.width = ((this.current + 1) / this.slides.length * 100) + '%';
+    document.getElementById('counterUi').textContent = `${String(this.current + 1).padStart(2, '0')} / ${this.slides.length}`;
+    history.replaceState(null, '', '#' + this.current);
+  }
+}
+
+/* ===========================================
+   TEST SLIDE: burn-in toggle on the bathtub curve
+   =========================================== */
+const burnBtn = document.getElementById('burnBtn');
+burnBtn.addEventListener('click', e => { e.stopPropagation(); const on = document.getElementById('tub').classList.toggle('burnin'); burnBtn.classList.toggle('on', on); burnBtn.textContent = on ? 'BURN-IN APPLIED' : 'APPLY BURN-IN'; });
+
+/* ===========================================
+   INLINE EDITING: hotzone or E toggles; edits autosave to localStorage; Ctrl+S downloads HTML
+   =========================================== */
+const editor = {
+  isActive: false, key: 'wafer-fab-deck-edits',
+  targets() { return [...document.querySelectorAll('.slide h1, .slide h2, .slide .thsub, .slide .item b, .slide .item p, .slide .lede, .slide .note, .slide .tile b, .slide .tile p, .slide .recap div')].filter(n => !n.closest('.lab')); },
+  load() { try { const d = JSON.parse(localStorage.getItem(this.key) || '{}'); const t = this.targets(); Object.entries(d).forEach(([i, v]) => { if (t[i]) t[i].textContent = v; }); } catch (e) { /* storage unavailable: keep authored text */ } },
+  save(i, v) { try { const d = JSON.parse(localStorage.getItem(this.key) || '{}'); d[i] = v; localStorage.setItem(this.key, JSON.stringify(d)); } catch (e) { /* ignore */ } },
+  toggleEditMode() {
+    this.isActive = !this.isActive; document.body.classList.toggle('editing', this.isActive);
+    const b = document.getElementById('editToggle'); b.classList.toggle('active', this.isActive); b.textContent = this.isActive ? 'EDITING · E' : 'EDIT · E';
+    this.targets().forEach((n, i) => { if (this.isActive) { n.contentEditable = 'true'; n.oninput = () => this.save(i, n.textContent); } else n.removeAttribute('contenteditable'); });
+  },
+  download() {
+    const c = document.documentElement.cloneNode(true);
+    c.querySelectorAll('.lab').forEach(l => l.replaceChildren());
+    c.querySelectorAll('[contenteditable]').forEach(n => n.removeAttribute('contenteditable'));
+    c.querySelector('body').classList.remove('editing');
+    const a = el('a'); a.href = URL.createObjectURL(new Blob(['<!DOCTYPE html>\n' + c.outerHTML], { type: 'text/html' })); a.download = 'wafer-fab-bootcamp.html'; a.click();
+  }
+};
+(() => {
+  const hot = document.getElementById('editHotzone'), tog = document.getElementById('editToggle'); let hide = null;
+  const later = () => { hide = setTimeout(() => { if (!editor.isActive) tog.classList.remove('show'); }, 400); };
+  hot.addEventListener('mouseenter', () => { clearTimeout(hide); tog.classList.add('show'); }); hot.addEventListener('mouseleave', later);
+  tog.addEventListener('mouseenter', () => clearTimeout(hide)); tog.addEventListener('mouseleave', later);
+  hot.addEventListener('click', () => editor.toggleEditMode()); tog.addEventListener('click', () => editor.toggleEditMode());
+  document.addEventListener('keydown', e => {
+    if ((e.key === 'e' || e.key === 'E') && !e.target.isContentEditable && !e.ctrlKey && !e.metaKey) editor.toggleEditMode();
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); editor.download(); }
+  });
+  editor.load();
+})();
+
+new SlidePresentation();
+</script>
+</body>
+</html>
